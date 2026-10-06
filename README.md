@@ -15,6 +15,13 @@ pnpm install
 pnpm dev
 ```
 
+`pnpm dev` starts the web application and API at `http://localhost:3000`.
+Start Expo separately when mobile development begins:
+
+```bash
+pnpm dev:mobile
+```
+
 Run quality checks with:
 
 ```bash

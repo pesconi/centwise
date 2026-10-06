@@ -9,7 +9,9 @@
     },
     "scripts": {
         "build": "turbo run build",
-        "dev": "turbo run dev --parallel",
+        "dev": "turbo run dev --filter=@centwise/web",
+        "dev:web": "turbo run dev --filter=@centwise/web",
+        "dev:mobile": "turbo run dev --filter=@centwise/mobile",
         "lint": "turbo run lint",
         "typecheck": "turbo run typecheck",
         "format": "prettier --write ."
@@ -17,6 +19,6 @@
     "devDependencies": {
         "prettier": "^3.4.2",
         "turbo": "^2.3.3",
-        "typescript": "^5.7.2"
+        "typescript": "6.0.3"
     }
 }
