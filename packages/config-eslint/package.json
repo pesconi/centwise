@@ -1,0 +1,12 @@
+{
+  "name": "@centwise/config-eslint",
+  "version": "0.1.0",
+  "private": true,
+  "files": [
+    "next.js",
+    "expo.js"
+  ],
+  "peerDependencies": {
+    "eslint": "^9.0.0"
+  }
+}
