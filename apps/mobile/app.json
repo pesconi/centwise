@@ -1,14 +1,16 @@
 {
-  "expo": {
-    "name": "Centwise",
-    "slug": "centwise",
-    "scheme": "centwise",
-    "version": "0.1.0",
-    "orientation": "portrait",
-    "userInterfaceStyle": "light",
-    "experiments": {
-      "typedRoutes": true
-    },
-    "plugins": ["expo-router"]
-  }
+    "expo": {
+        "name": "Centwise",
+        "slug": "centwise",
+        "scheme": "centwise",
+        "version": "0.1.0",
+        "orientation": "portrait",
+        "userInterfaceStyle": "light",
+        "experiments": {
+            "typedRoutes": true
+        },
+        "plugins": [
+            "expo-router"
+        ]
+    }
 }

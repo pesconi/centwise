@@ -1,7 +1,13 @@
 {
-  "extends": "@centwise/config-typescript/react-native.json",
-  "compilerOptions": {
-    "noEmit": true
-  },
-  "include": ["app/**/*.ts", "app/**/*.tsx", "src/**/*.ts", "src/**/*.tsx", "expo-env.d.ts"]
+    "extends": "@centwise/config-typescript/react-native.json",
+    "compilerOptions": {
+        "noEmit": true
+    },
+    "include": [
+        "app/**/*.ts",
+        "app/**/*.tsx",
+        "src/**/*.ts",
+        "src/**/*.tsx",
+        "expo-env.d.ts"
+    ]
 }

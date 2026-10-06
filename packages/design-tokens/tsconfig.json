@@ -1,7 +1,9 @@
 {
-  "extends": "@centwise/config-typescript/base.json",
-  "compilerOptions": {
-    "noEmit": true
-  },
-  "include": ["src/**/*.ts"]
+    "extends": "@centwise/config-typescript/base.json",
+    "compilerOptions": {
+        "noEmit": true
+    },
+    "include": [
+        "src/**/*.ts"
+    ]
 }

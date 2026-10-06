@@ -1,31 +1,31 @@
 {
-  "name": "@centwise/mobile",
-  "version": "0.1.0",
-  "private": true,
-  "main": "expo-router/entry",
-  "scripts": {
-    "build": "expo export --platform all",
-    "dev": "expo start",
-    "lint": "eslint .",
-    "typecheck": "tsc --noEmit"
-  },
-  "dependencies": {
-    "@centwise/core": "workspace:*",
-    "@centwise/design-tokens": "workspace:*",
-    "@tanstack/react-query": "^5.62.11",
-    "expo": "^52.0.25",
-    "expo-router": "^4.0.14",
-    "expo-status-bar": "~2.0.0",
-    "react": "18.3.1",
-    "react-dom": "18.3.1",
-    "react-native": "0.76.6",
-    "zustand": "^5.0.2"
-  },
-  "devDependencies": {
-    "@centwise/config-eslint": "workspace:*",
-    "@centwise/config-typescript": "workspace:*",
-    "@types/react": "~18.3.12",
-    "eslint": "^9.17.0",
-    "typescript": "^5.7.2"
-  }
+    "name": "@centwise/mobile",
+    "version": "0.1.0",
+    "private": true,
+    "main": "expo-router/entry",
+    "scripts": {
+        "build": "expo export --platform all",
+        "dev": "expo start",
+        "lint": "eslint .",
+        "typecheck": "tsc --noEmit"
+    },
+    "dependencies": {
+        "@centwise/core": "workspace:*",
+        "@centwise/design-tokens": "workspace:*",
+        "@tanstack/react-query": "^5.62.11",
+        "expo": "^52.0.25",
+        "expo-router": "^4.0.14",
+        "expo-status-bar": "~2.0.0",
+        "react": "18.3.1",
+        "react-dom": "18.3.1",
+        "react-native": "0.76.6",
+        "zustand": "^5.0.2"
+    },
+    "devDependencies": {
+        "@centwise/config-eslint": "workspace:*",
+        "@centwise/config-typescript": "workspace:*",
+        "@types/react": "~18.3.12",
+        "eslint": "^9.17.0",
+        "typescript": "^5.7.2"
+    }
 }

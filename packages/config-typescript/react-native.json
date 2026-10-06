@@ -1,9 +1,14 @@
 {
-  "$schema": "https://json.schemastore.org/tsconfig",
-  "extends": "./base.json",
-  "compilerOptions": {
-    "jsx": "react-jsx",
-    "lib": ["ES2022"],
-    "types": ["react", "react-native"]
-  }
+    "$schema": "https://json.schemastore.org/tsconfig",
+    "extends": "./base.json",
+    "compilerOptions": {
+        "jsx": "react-jsx",
+        "lib": [
+            "ES2022"
+        ],
+        "types": [
+            "react",
+            "react-native"
+        ]
+    }
 }
