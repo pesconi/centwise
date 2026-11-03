@@ -1,1 +1,0 @@
-ALTER TABLE "financial_settings" ALTER COLUMN "currency" SET DEFAULT 'EUR';

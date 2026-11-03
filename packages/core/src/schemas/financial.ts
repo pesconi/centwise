@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-const currencySchema = z.string().regex(/^[A-Z]{3}$/);
+const currencySchema = z.literal("EUR");
 const nameSchema = z.string().trim().min(1).max(100);
 const nonNegativeCentsSchema = z.number().int().nonnegative();
 const dayOfMonthSchema = z.number().int().min(1).max(31);
@@ -19,7 +19,7 @@ export const financialSettingsSchema = z.object({
 
 export const accountSchema = z.object({
     name: nameSchema,
-    currentBalanceCents: z.number().int(),
+    openingBalanceCents: z.number().int(),
     currency: currencySchema
 });
 

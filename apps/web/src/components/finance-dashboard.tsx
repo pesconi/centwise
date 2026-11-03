@@ -10,11 +10,20 @@ interface CurrentUser {
 
 interface Transaction {
     id: string;
+    accountId: string;
     amountInCents: number;
     currency: string;
     type: "income" | "expense";
     occurredAt: string;
     description: string | null;
+}
+
+interface Account {
+    id: string;
+    name: string;
+    openingBalanceCents: number;
+    currency: "EUR";
+    isActive: boolean;
 }
 
 async function requestJson<T>(input: RequestInfo | URL, init?: RequestInit): Promise<T> {
@@ -39,6 +48,8 @@ export function FinanceDashboard() {
     const [password, setPassword] = useState("");
     const [authMode, setAuthMode] = useState<"login" | "register">("login");
     const [formError, setFormError] = useState<string | null>(null);
+    const [accountFormError, setAccountFormError] = useState<string | null>(null);
+    const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
 
     const sessionQuery = useQuery({
         queryKey: ["session"],
@@ -65,6 +76,12 @@ export function FinanceDashboard() {
         enabled: Boolean(user)
     });
 
+    const accountsQuery = useQuery({
+        queryKey: ["accounts"],
+        queryFn: () => requestJson<{ accounts: Account[] }>("/api/accounts"),
+        enabled: Boolean(user)
+    });
+
     const authMutation = useMutation({
         mutationFn: (credentials: { email: string; password: string }) =>
             requestJson<{ user: CurrentUser }>(`/api/auth/${authMode}`, {
@@ -84,9 +101,24 @@ export function FinanceDashboard() {
         onSuccess: () => {
             queryClient.setQueryData(["session"], null);
             queryClient.removeQueries({ queryKey: ["transactions"] });
+            queryClient.removeQueries({ queryKey: ["accounts"] });
             setAuthMode("login");
             setEmail("");
             setPassword("");
+            setSelectedAccountId(null);
+        }
+    });
+
+    const accountMutation = useMutation({
+        mutationFn: (account: Omit<Account, "id" | "isActive">) =>
+            requestJson<{ account: Account }>("/api/accounts", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(account)
+            }),
+        onSuccess: async ({ account }) => {
+            setSelectedAccountId(account.id);
+            await queryClient.invalidateQueries({ queryKey: ["accounts"] });
         }
     });
 
@@ -134,13 +166,44 @@ export function FinanceDashboard() {
             return;
         }
 
+        const accountId = selectedAccountId ?? accounts[0]?.id;
+
+        if (!accountId) {
+            setFormError("Create an account before recording a transaction.");
+            return;
+        }
+
         transactionMutation.mutate(
             {
+                accountId,
                 amountInCents,
-                currency: String(formData.get("currency")),
+                currency: "EUR",
                 type: String(formData.get("type")) as Transaction["type"],
                 occurredAt: new Date(String(formData.get("occurredAt"))).toISOString(),
                 description: String(formData.get("description")) || null
+            },
+            { onSuccess: () => form.reset() }
+        );
+    }
+
+    function handleAccountSubmit(event: FormEvent<HTMLFormElement>) {
+        event.preventDefault();
+        setAccountFormError(null);
+
+        const form = event.currentTarget;
+        const formData = new FormData(form);
+        const openingBalanceCents = Math.round(Number(formData.get("openingBalance")) * 100);
+
+        if (!Number.isSafeInteger(openingBalanceCents)) {
+            setAccountFormError("Enter a valid opening balance.");
+            return;
+        }
+
+        accountMutation.mutate(
+            {
+                name: String(formData.get("name")),
+                openingBalanceCents,
+                currency: "EUR"
             },
             { onSuccess: () => form.reset() }
         );
@@ -155,7 +218,10 @@ export function FinanceDashboard() {
     }
 
     const transactions = transactionsQuery.data?.transactions ?? [];
-    const balanceInCents = transactions.reduce(
+    const accounts = accountsQuery.data?.accounts.filter((account) => account.isActive) ?? [];
+    const activeAccountId = selectedAccountId ?? accounts[0]?.id ?? "";
+    const activeAccountIds = new Set(accounts.map((account) => account.id));
+    const balanceInCents = accounts.reduce((total, account) => total + account.openingBalanceCents, 0) + transactions.filter((transaction) => activeAccountIds.has(transaction.accountId)).reduce(
         (total, transaction) => total + (transaction.type === "income" ? transaction.amountInCents : -transaction.amountInCents),
         0
     );
@@ -202,8 +268,28 @@ export function FinanceDashboard() {
                     <div className="grid gap-8 lg:grid-cols-[0.72fr_1.28fr]">
                         <section className="border-t-4 border-spruce bg-white p-6 shadow-[0_20px_50px_-32px_rgba(23,33,29,0.45)] sm:p-8">
                             <p className="text-sm font-semibold uppercase tracking-[0.14em] text-ink/55">Current balance</p>
-                            <p className={`mt-4 text-5xl font-semibold tracking-tight ${balanceInCents < 0 ? "text-red-700" : "text-ink"}`}>{formatCurrency(balanceInCents, "USD")}</p>
-                            <p className="mt-3 text-sm text-ink/60">Based on {transactions.length} recorded {transactions.length === 1 ? "transaction" : "transactions"}.</p>
+                            <p className={`mt-4 text-5xl font-semibold tracking-tight ${balanceInCents < 0 ? "text-red-700" : "text-ink"}`}>{formatCurrency(balanceInCents, "EUR")}</p>
+                            <p className="mt-3 text-sm text-ink/60">Across {accounts.length} active {accounts.length === 1 ? "account" : "accounts"} and {transactions.length} recorded {transactions.length === 1 ? "transaction" : "transactions"}.</p>
+
+                            {accounts.length === 0 ? (
+                                <form className="mt-10 grid gap-4 border-t border-ink/10 pt-8" onSubmit={handleAccountSubmit}>
+                                    <div>
+                                        <h2 className="text-xl font-semibold">Add your first account</h2>
+                                        <p className="mt-1 text-sm text-ink/60">Start from the balance you have today.</p>
+                                    </div>
+                                    <label className="grid gap-2 text-sm font-semibold" htmlFor="accountName">Account name
+                                        <input className="h-11 border border-ink/20 bg-canvas px-3 outline-none ring-spruce focus:ring-2" id="accountName" name="name" placeholder="Main account" required />
+                                    </label>
+                                    <label className="grid gap-2 text-sm font-semibold" htmlFor="openingBalance">Opening balance (EUR)
+                                        <input className="h-11 border border-ink/20 bg-canvas px-3 outline-none ring-spruce focus:ring-2" id="openingBalance" name="openingBalance" placeholder="0.00" required step="0.01" type="number" />
+                                    </label>
+                                    <button className="h-11 bg-spruce px-4 font-semibold text-white transition hover:bg-ink disabled:cursor-not-allowed disabled:opacity-60" disabled={accountMutation.isPending} type="submit">
+                                        {accountMutation.isPending ? "Saving account..." : "Add account"}
+                                    </button>
+                                    {accountFormError ? <p className="text-sm text-red-700">{accountFormError}</p> : null}
+                                    {accountMutation.isError ? <p className="text-sm text-red-700">{accountMutation.error.message}</p> : null}
+                                </form>
+                            ) : null}
 
                             <form className="mt-10 grid gap-4" onSubmit={handleTransactionSubmit}>
                                 <div className="grid gap-2">
@@ -225,15 +311,16 @@ export function FinanceDashboard() {
                                     <label className="grid gap-2 text-sm font-semibold" htmlFor="occurredAt">Date
                                         <input className="h-11 border border-ink/20 bg-canvas px-3 outline-none ring-spruce focus:ring-2" defaultValue={new Date().toISOString().slice(0, 10)} id="occurredAt" name="occurredAt" required type="date" />
                                     </label>
-                                    <label className="grid gap-2 text-sm font-semibold" htmlFor="currency">Currency
-                                        <select className="h-11 border border-ink/20 bg-canvas px-3 outline-none ring-spruce focus:ring-2" defaultValue="USD" id="currency" name="currency">
-                                            <option value="USD">USD</option>
-                                            <option value="EUR">EUR</option>
-                                            <option value="BRL">BRL</option>
+                                    <label className="grid gap-2 text-sm font-semibold" htmlFor="accountId">Account
+                                        <select className="h-11 border border-ink/20 bg-canvas px-3 outline-none ring-spruce focus:ring-2" disabled={accounts.length === 0} id="accountId" onChange={(event) => setSelectedAccountId(event.target.value)} value={activeAccountId}>
+                                            {accounts.length === 0 ? <option value="">Add an account first</option> : null}
+                                            {accounts.map((account) => (
+                                                <option key={account.id} value={account.id}>{account.name}</option>
+                                            ))}
                                         </select>
                                     </label>
                                 </div>
-                                <button className="mt-2 h-11 bg-clay px-4 font-semibold text-white transition hover:bg-ink disabled:cursor-not-allowed disabled:opacity-60" disabled={transactionMutation.isPending} type="submit">
+                                <button className="mt-2 h-11 bg-clay px-4 font-semibold text-white transition hover:bg-ink disabled:cursor-not-allowed disabled:opacity-60" disabled={transactionMutation.isPending || accounts.length === 0} type="submit">
                                     {transactionMutation.isPending ? "Saving..." : "Add transaction"}
                                 </button>
                                 {formError ? <p className="text-sm text-red-700">{formError}</p> : null}

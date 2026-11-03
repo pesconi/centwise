@@ -5,29 +5,8 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1791549346023,
-      "tag": "0000_useful_captain_britain",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "7",
-      "when": 1793632955071,
-      "tag": "0001_cloudy_surge",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "7",
-      "when": 1793707033024,
-      "tag": "0002_motionless_starhawk",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "7",
-      "when": 1793707143952,
-      "tag": "0003_yummy_malcolm_colcord",
+      "when": 1793714302131,
+      "tag": "0000_faithful_the_twelve",
       "breakpoints": true
     }
   ]

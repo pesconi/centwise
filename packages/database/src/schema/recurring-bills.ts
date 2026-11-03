@@ -1,4 +1,5 @@
-import { bigint, boolean, index, integer, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
+import { bigint, boolean, check, index, integer, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 
 import { users } from "./users";
 
@@ -14,5 +15,9 @@ export const recurringBills = pgTable(
         createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
         updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull()
     },
-    (table) => [index("recurring_bills_user_id_idx").on(table.userId)]
+    (table) => [
+        index("recurring_bills_user_id_idx").on(table.userId),
+        check("recurring_bills_amount_positive_check", sql`${table.amountInCents} > 0`),
+        check("recurring_bills_due_day_check", sql`${table.dueDayOfMonth} BETWEEN 1 AND 31`)
+    ]
 );

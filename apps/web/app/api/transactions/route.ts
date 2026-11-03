@@ -47,6 +47,18 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         );
     }
 
+    const account = await db.query.accounts.findFirst({
+        where: (accounts, { and, eq }) => and(
+            eq(accounts.id, parsedTransaction.data.accountId),
+            eq(accounts.userId, userId),
+            eq(accounts.isActive, true)
+        )
+    });
+
+    if (!account) {
+        return NextResponse.json({ error: "Active account not found." }, { status: 404 });
+    }
+
     const [transaction] = await db
         .insert(schema.transactions)
         .values({ ...parsedTransaction.data, userId })
