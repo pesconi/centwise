@@ -1,0 +1,35 @@
+import { z } from "zod";
+
+const currencySchema = z.string().regex(/^[A-Z]{3}$/);
+const nameSchema = z.string().trim().min(1).max(100);
+const nonNegativeCentsSchema = z.number().int().nonnegative();
+const dayOfMonthSchema = z.number().int().min(1).max(31);
+
+export const financialSettingsSchema = z.object({
+    currency: currencySchema,
+    safetyReserveCents: nonNegativeCentsSchema,
+    monthlyInvestmentCents: nonNegativeCentsSchema
+});
+
+export const accountSchema = z.object({
+    name: nameSchema,
+    currentBalanceCents: z.number().int(),
+    currency: currencySchema
+});
+
+export const recurringIncomeSchema = z.object({
+    name: nameSchema,
+    amountInCents: z.number().int().positive(),
+    expectedDayOfMonth: dayOfMonthSchema
+});
+
+export const recurringBillSchema = z.object({
+    name: nameSchema,
+    amountInCents: z.number().int().positive(),
+    dueDayOfMonth: dayOfMonthSchema
+});
+
+export type FinancialSettingsInput = z.infer<typeof financialSettingsSchema>;
+export type AccountInput = z.infer<typeof accountSchema>;
+export type RecurringIncomeInput = z.infer<typeof recurringIncomeSchema>;
+export type RecurringBillInput = z.infer<typeof recurringBillSchema>;

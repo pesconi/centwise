@@ -15,6 +15,13 @@
       "when": 1793632955071,
       "tag": "0001_cloudy_surge",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793707033024,
+      "tag": "0002_motionless_starhawk",
+      "breakpoints": true
     }
   ]
 }
