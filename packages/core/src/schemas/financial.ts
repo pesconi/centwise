@@ -5,6 +5,12 @@ const nameSchema = z.string().trim().min(1).max(100);
 const nonNegativeCentsSchema = z.number().int().nonnegative();
 const dayOfMonthSchema = z.number().int().min(1).max(31);
 
+export const defaultFinancialSettings = {
+    currency: "EUR",
+    safetyReserveCents: 0,
+    monthlyInvestmentCents: 0
+} as const;
+
 export const financialSettingsSchema = z.object({
     currency: currencySchema,
     safetyReserveCents: nonNegativeCentsSchema,
