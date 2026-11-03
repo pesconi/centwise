@@ -33,14 +33,24 @@ export const recurringIncomeSchema = z.object({
     expectedDayOfMonth: dayOfMonthSchema
 });
 
+export const recurringIncomeUpdateSchema = recurringIncomeSchema.partial().extend({
+    isActive: z.boolean().optional()
+}).refine((value) => Object.keys(value).length > 0, "At least one recurring income field is required.");
+
 export const recurringBillSchema = z.object({
     name: nameSchema,
     amountInCents: z.number().int().positive(),
     dueDayOfMonth: dayOfMonthSchema
 });
 
+export const recurringBillUpdateSchema = recurringBillSchema.partial().extend({
+    isActive: z.boolean().optional()
+}).refine((value) => Object.keys(value).length > 0, "At least one recurring bill field is required.");
+
 export type FinancialSettingsInput = z.infer<typeof financialSettingsSchema>;
 export type AccountInput = z.infer<typeof accountSchema>;
 export type AccountUpdateInput = z.infer<typeof accountUpdateSchema>;
 export type RecurringIncomeInput = z.infer<typeof recurringIncomeSchema>;
 export type RecurringBillInput = z.infer<typeof recurringBillSchema>;
+export type RecurringIncomeUpdateInput = z.infer<typeof recurringIncomeUpdateSchema>;
+export type RecurringBillUpdateInput = z.infer<typeof recurringBillUpdateSchema>;
