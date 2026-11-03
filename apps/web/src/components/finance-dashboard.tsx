@@ -26,6 +26,15 @@ interface Account {
     isActive: boolean;
 }
 
+interface FreeToSpendResult {
+    liquidBalanceCents: number;
+    remainingIncomeCents: number;
+    remainingBillsCents: number;
+    remainingInvestmentCents: number;
+    safetyReserveCents: number;
+    freeToSpendCents: number;
+}
+
 async function requestJson<T>(input: RequestInfo | URL, init?: RequestInit): Promise<T> {
     const response = await fetch(input, init);
     const payload: unknown = await response.json();
@@ -82,6 +91,12 @@ export function FinanceDashboard() {
         enabled: Boolean(user)
     });
 
+    const freeToSpendQuery = useQuery({
+        queryKey: ["free-to-spend"],
+        queryFn: () => requestJson<{ calculation: FreeToSpendResult }>("/api/free-to-spend"),
+        enabled: Boolean(user)
+    });
+
     const authMutation = useMutation({
         mutationFn: (credentials: { email: string; password: string }) =>
             requestJson<{ user: CurrentUser }>(`/api/auth/${authMode}`, {
@@ -102,6 +117,7 @@ export function FinanceDashboard() {
             queryClient.setQueryData(["session"], null);
             queryClient.removeQueries({ queryKey: ["transactions"] });
             queryClient.removeQueries({ queryKey: ["accounts"] });
+            queryClient.removeQueries({ queryKey: ["free-to-spend"] });
             setAuthMode("login");
             setEmail("");
             setPassword("");
@@ -119,6 +135,7 @@ export function FinanceDashboard() {
         onSuccess: async ({ account }) => {
             setSelectedAccountId(account.id);
             await queryClient.invalidateQueries({ queryKey: ["accounts"] });
+            await queryClient.invalidateQueries({ queryKey: ["free-to-spend"] });
         }
     });
 
@@ -131,6 +148,7 @@ export function FinanceDashboard() {
             }),
         onSuccess: async () => {
             await queryClient.invalidateQueries({ queryKey: ["transactions"] });
+            await queryClient.invalidateQueries({ queryKey: ["free-to-spend"] });
         }
     });
 
@@ -141,6 +159,7 @@ export function FinanceDashboard() {
             }),
         onSuccess: async () => {
             await queryClient.invalidateQueries({ queryKey: ["transactions"] });
+            await queryClient.invalidateQueries({ queryKey: ["free-to-spend"] });
         }
     });
 
@@ -225,6 +244,7 @@ export function FinanceDashboard() {
         (total, transaction) => total + (transaction.type === "income" ? transaction.amountInCents : -transaction.amountInCents),
         0
     );
+    const calculation = freeToSpendQuery.data?.calculation;
 
     return (
         <main className="min-h-screen bg-[linear-gradient(125deg,#f7f7f2_0%,#edf4ee_52%,#f7f7f2_100%)] px-5 py-8 sm:px-8 lg:px-12">
@@ -267,9 +287,10 @@ export function FinanceDashboard() {
                 ) : (
                     <div className="grid gap-8 lg:grid-cols-[0.72fr_1.28fr]">
                         <section className="border-t-4 border-spruce bg-white p-6 shadow-[0_20px_50px_-32px_rgba(23,33,29,0.45)] sm:p-8">
-                            <p className="text-sm font-semibold uppercase tracking-[0.14em] text-ink/55">Current balance</p>
-                            <p className={`mt-4 text-5xl font-semibold tracking-tight ${balanceInCents < 0 ? "text-red-700" : "text-ink"}`}>{formatCurrency(balanceInCents, "EUR")}</p>
-                            <p className="mt-3 text-sm text-ink/60">Across {accounts.length} active {accounts.length === 1 ? "account" : "accounts"} and {transactions.length} recorded {transactions.length === 1 ? "transaction" : "transactions"}.</p>
+                            <p className="text-sm font-semibold uppercase tracking-[0.14em] text-ink/55">Free to spend</p>
+                            <p className={`mt-4 text-5xl font-semibold tracking-tight ${calculation && calculation.freeToSpendCents < 0 ? "text-red-700" : "text-ink"}`}>{calculation ? formatCurrency(calculation.freeToSpendCents, "EUR") : "--"}</p>
+                            <p className="mt-3 text-sm text-ink/60">Current liquid balance: {formatCurrency(balanceInCents, "EUR")} across {accounts.length} active {accounts.length === 1 ? "account" : "accounts"}.</p>
+                            {freeToSpendQuery.isError ? <p className="mt-3 text-sm text-red-700">{freeToSpendQuery.error.message}</p> : null}
 
                             {accounts.length === 0 ? (
                                 <form className="mt-10 grid gap-4 border-t border-ink/10 pt-8" onSubmit={handleAccountSubmit}>

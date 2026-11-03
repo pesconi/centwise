@@ -1,0 +1,87 @@
+export interface FreeToSpendAccount {
+    id: string;
+    openingBalanceCents: number;
+    isActive: boolean;
+}
+
+export interface FreeToSpendTransaction {
+    accountId: string;
+    amountInCents: number;
+    type: "income" | "expense";
+    occurredAt: Date;
+}
+
+export interface FreeToSpendRecurringIncome {
+    amountInCents: number;
+    expectedDayOfMonth: number;
+    isActive: boolean;
+}
+
+export interface FreeToSpendRecurringBill {
+    amountInCents: number;
+    dueDayOfMonth: number;
+    isActive: boolean;
+}
+
+export interface FreeToSpendInput {
+    asOf: Date;
+    accounts: FreeToSpendAccount[];
+    transactions: FreeToSpendTransaction[];
+    recurringIncomes: FreeToSpendRecurringIncome[];
+    recurringBills: FreeToSpendRecurringBill[];
+    monthlyInvestmentCents: number;
+    safetyReserveCents: number;
+}
+
+export interface FreeToSpendResult {
+    liquidBalanceCents: number;
+    remainingIncomeCents: number;
+    remainingBillsCents: number;
+    remainingInvestmentCents: number;
+    safetyReserveCents: number;
+    freeToSpendCents: number;
+}
+
+function getLastDayOfMonth(date: Date): number {
+    return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0)).getUTCDate();
+}
+
+function occursAfterToday(dayOfMonth: number, asOf: Date): boolean {
+    return Math.min(dayOfMonth, getLastDayOfMonth(asOf)) > asOf.getUTCDate();
+}
+
+function isDueTodayOrLater(dayOfMonth: number, asOf: Date): boolean {
+    return Math.min(dayOfMonth, getLastDayOfMonth(asOf)) >= asOf.getUTCDate();
+}
+
+export function calculateFreeToSpend(input: FreeToSpendInput): FreeToSpendResult {
+    const activeAccountIds = new Set(input.accounts.filter((account) => account.isActive).map((account) => account.id));
+    const liquidBalanceCents = input.accounts
+        .filter((account) => account.isActive)
+        .reduce((total, account) => total + account.openingBalanceCents, 0) + input.transactions
+        .filter((transaction) => activeAccountIds.has(transaction.accountId) && transaction.occurredAt <= input.asOf)
+        .reduce(
+            (total, transaction) => total + (transaction.type === "income" ? transaction.amountInCents : -transaction.amountInCents),
+            0
+        );
+    const remainingIncomeCents = input.recurringIncomes
+        .filter((income) => income.isActive && occursAfterToday(income.expectedDayOfMonth, input.asOf))
+        .reduce((total, income) => total + income.amountInCents, 0);
+    const remainingBillsCents = input.recurringBills
+        .filter((bill) => bill.isActive && isDueTodayOrLater(bill.dueDayOfMonth, input.asOf))
+        .reduce((total, bill) => total + bill.amountInCents, 0);
+    const freeToSpendCents = liquidBalanceCents
+        + remainingIncomeCents
+        - remainingBillsCents
+        - input.monthlyInvestmentCents
+        - input.safetyReserveCents;
+
+    return {
+        liquidBalanceCents,
+        remainingIncomeCents,
+        remainingBillsCents,
+        remainingInvestmentCents: input.monthlyInvestmentCents,
+        safetyReserveCents: input.safetyReserveCents,
+        freeToSpendCents
+    };
+}

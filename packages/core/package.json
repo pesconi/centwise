@@ -12,6 +12,7 @@
     "scripts": {
         "build": "tsc --noEmit",
         "lint": "eslint src",
+        "test": "vitest run",
         "typecheck": "tsc --noEmit"
     },
     "dependencies": {
@@ -20,6 +21,7 @@
     "devDependencies": {
         "@centwise/config-typescript": "workspace:*",
         "eslint": "^9.17.0",
-        "typescript": "6.0.3"
+        "typescript": "6.0.3",
+        "vitest": "^5.1.0"
     }
 }
