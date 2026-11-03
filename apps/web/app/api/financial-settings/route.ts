@@ -16,7 +16,10 @@ export async function GET(): Promise<NextResponse> {
         where: (financialSettings, { eq }) => eq(financialSettings.userId, userId)
     });
 
-    return NextResponse.json({ settings: settings ?? defaultFinancialSettings });
+    return NextResponse.json({
+        settings: settings ?? defaultFinancialSettings,
+        isConfigured: Boolean(settings)
+    });
 }
 
 export async function PUT(request: NextRequest): Promise<NextResponse> {

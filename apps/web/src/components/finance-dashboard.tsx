@@ -35,6 +35,12 @@ interface FreeToSpendResult {
     freeToSpendCents: number;
 }
 
+interface PlanEntryDraft {
+    name: string;
+    amount: string;
+    day: string;
+}
+
 async function requestJson<T>(input: RequestInfo | URL, init?: RequestInit): Promise<T> {
     const response = await fetch(input, init);
     const payload: unknown = await response.json();
@@ -58,6 +64,9 @@ export function FinanceDashboard() {
     const [authMode, setAuthMode] = useState<"login" | "register">("login");
     const [formError, setFormError] = useState<string | null>(null);
     const [accountFormError, setAccountFormError] = useState<string | null>(null);
+    const [onboardingError, setOnboardingError] = useState<string | null>(null);
+    const [incomeDrafts, setIncomeDrafts] = useState<PlanEntryDraft[]>([]);
+    const [billDrafts, setBillDrafts] = useState<PlanEntryDraft[]>([]);
     const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
 
     const sessionQuery = useQuery({
@@ -97,6 +106,12 @@ export function FinanceDashboard() {
         enabled: Boolean(user)
     });
 
+    const financialSettingsQuery = useQuery({
+        queryKey: ["financial-settings"],
+        queryFn: () => requestJson<{ settings: { safetyReserveCents: number; monthlyInvestmentCents: number }; isConfigured: boolean }>("/api/financial-settings"),
+        enabled: Boolean(user)
+    });
+
     const authMutation = useMutation({
         mutationFn: (credentials: { email: string; password: string }) =>
             requestJson<{ user: CurrentUser }>(`/api/auth/${authMode}`, {
@@ -118,6 +133,7 @@ export function FinanceDashboard() {
             queryClient.removeQueries({ queryKey: ["transactions"] });
             queryClient.removeQueries({ queryKey: ["accounts"] });
             queryClient.removeQueries({ queryKey: ["free-to-spend"] });
+            queryClient.removeQueries({ queryKey: ["financial-settings"] });
             setAuthMode("login");
             setEmail("");
             setPassword("");
@@ -136,6 +152,27 @@ export function FinanceDashboard() {
             setSelectedAccountId(account.id);
             await queryClient.invalidateQueries({ queryKey: ["accounts"] });
             await queryClient.invalidateQueries({ queryKey: ["free-to-spend"] });
+        }
+    });
+
+    const onboardingMutation = useMutation({
+        mutationFn: (onboarding: {
+            account?: Omit<Account, "id" | "isActive">;
+            recurringIncomes: { name: string; amountInCents: number; expectedDayOfMonth: number }[];
+            recurringBills: { name: string; amountInCents: number; dueDayOfMonth: number }[];
+            safetyReserveCents: number;
+            monthlyInvestmentCents: number;
+        }) => requestJson<{ success: boolean }>("/api/financial-onboarding", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(onboarding)
+        }),
+        onSuccess: async () => {
+            await Promise.all([
+                queryClient.invalidateQueries({ queryKey: ["accounts"] }),
+                queryClient.invalidateQueries({ queryKey: ["financial-settings"] }),
+                queryClient.invalidateQueries({ queryKey: ["free-to-spend"] })
+            ]);
         }
     });
 
@@ -228,6 +265,76 @@ export function FinanceDashboard() {
         );
     }
 
+    function handleOnboardingSubmit(event: FormEvent<HTMLFormElement>) {
+        event.preventDefault();
+        setOnboardingError(null);
+
+        const formData = new FormData(event.currentTarget);
+        const parseAmount = (value: FormDataEntryValue | null): number | null => {
+            const amountInCents = Math.round(Number(value) * 100);
+            return Number.isSafeInteger(amountInCents) && amountInCents >= 0 ? amountInCents : null;
+        };
+        const parseEntries = (
+            drafts: PlanEntryDraft[],
+            field: "income" | "bill"
+        ): { name: string; amountInCents: number; day: number }[] | null => {
+            const entries: { name: string; amountInCents: number; day: number }[] = [];
+
+            for (const [index] of drafts.entries()) {
+                const name = String(formData.get(`${field}Name${index}`) ?? "").trim();
+                const rawAmount = String(formData.get(`${field}Amount${index}`) ?? "").trim();
+                const rawDay = String(formData.get(`${field}Day${index}`) ?? "").trim();
+
+                if (!name && !rawAmount && !rawDay) {
+                    continue;
+                }
+
+                const amountInCents = parseAmount(rawAmount);
+                const day = Number(rawDay);
+
+                if (!name || amountInCents === null || amountInCents <= 0 || !Number.isInteger(day) || day < 1 || day > 31) {
+                    return null;
+                }
+
+                entries.push({ name, amountInCents, day });
+            }
+
+            return entries;
+        };
+
+        const recurringIncomes = parseEntries(incomeDrafts, "income");
+        const recurringBills = parseEntries(billDrafts, "bill");
+        const safetyReserveCents = parseAmount(formData.get("safetyReserve"));
+        const monthlyInvestmentCents = parseAmount(formData.get("monthlyInvestment"));
+
+        if (!recurringIncomes || !recurringBills || safetyReserveCents === null || monthlyInvestmentCents === null) {
+            setOnboardingError("Complete each added item with a name, positive amount, and day from 1 to 31. Reserve and investment must be zero or more.");
+            return;
+        }
+
+        let account: Omit<Account, "id" | "isActive"> | undefined;
+
+        if (accounts.length === 0) {
+            const name = String(formData.get("accountName") ?? "").trim();
+            const openingBalanceCents = parseAmount(formData.get("openingBalance"));
+
+            if (!name || openingBalanceCents === null) {
+                setOnboardingError("Enter an account name and a valid opening balance.");
+                return;
+            }
+
+            account = { name, openingBalanceCents, currency: "EUR" };
+        }
+
+        onboardingMutation.mutate({
+            account,
+            recurringIncomes: recurringIncomes.map(({ name, amountInCents, day }) => ({ name, amountInCents, expectedDayOfMonth: day })),
+            recurringBills: recurringBills.map(({ name, amountInCents, day }) => ({ name, amountInCents, dueDayOfMonth: day })),
+            safetyReserveCents,
+            monthlyInvestmentCents
+        });
+    }
+
     function handleTransactionDelete(transactionId: string) {
         if (!user) {
             return;
@@ -245,6 +352,7 @@ export function FinanceDashboard() {
         0
     );
     const calculation = freeToSpendQuery.data?.calculation;
+    const requiresOnboarding = Boolean(user) && financialSettingsQuery.data?.isConfigured === false;
 
     return (
         <main className="min-h-screen bg-[linear-gradient(125deg,#f7f7f2_0%,#edf4ee_52%,#f7f7f2_100%)] px-5 py-8 sm:px-8 lg:px-12">
@@ -282,6 +390,101 @@ export function FinanceDashboard() {
                                 {authMode === "login" ? "Create an account" : "I already have an account"}
                             </button>
                             {authMutation.isError ? <p className="text-sm text-red-700">{authMutation.error.message}</p> : null}
+                        </form>
+                    </section>
+                ) : accountsQuery.isLoading || financialSettingsQuery.isLoading ? (
+                    <p className="py-16 text-center text-ink/60">Loading your financial setup...</p>
+                ) : accountsQuery.isError || financialSettingsQuery.isError ? (
+                    <p className="py-16 text-center text-red-700">Could not load your financial setup. Refresh to try again.</p>
+                ) : requiresOnboarding ? (
+                    <section className="max-w-3xl border-t-4 border-clay bg-white p-6 shadow-[0_20px_50px_-32px_rgba(23,33,29,0.45)] sm:p-8">
+                        <div className="mb-8 border-b border-ink/10 pb-6">
+                            <p className="text-sm font-semibold uppercase tracking-[0.14em] text-spruce">Your monthly plan</p>
+                            <h2 className="mt-2 text-3xl font-semibold">Set up your starting point</h2>
+                            <p className="mt-2 max-w-xl text-ink/60">Add what you know. Income and bills are optional, and you can change this plan later.</p>
+                        </div>
+                        <form className="grid gap-8" onSubmit={handleOnboardingSubmit}>
+                            {accounts.length === 0 ? (
+                                <fieldset className="grid gap-4">
+                                    <legend className="text-xl font-semibold">Starting balance</legend>
+                                    <div className="grid gap-4 sm:grid-cols-2">
+                                        <label className="grid gap-2 text-sm font-semibold" htmlFor="setupAccountName">Account name
+                                            <input className="h-11 border border-ink/20 bg-canvas px-3 outline-none ring-spruce focus:ring-2" autoComplete="off" id="setupAccountName" name="accountName" placeholder="Main account" required />
+                                        </label>
+                                        <label className="grid gap-2 text-sm font-semibold" htmlFor="setupOpeningBalance">Balance today (EUR)
+                                            <input className="h-11 border border-ink/20 bg-canvas px-3 outline-none ring-spruce focus:ring-2" defaultValue="0.00" id="setupOpeningBalance" min="0" name="openingBalance" required step="0.01" type="number" />
+                                        </label>
+                                    </div>
+                                </fieldset>
+                            ) : null}
+
+                            <fieldset className="grid gap-4">
+                                <legend className="text-xl font-semibold">Monthly income</legend>
+                                <div className="flex items-center justify-between gap-4">
+                                    <div>
+                                        <p className="mt-1 text-sm text-ink/60">Leave empty if you have none or prefer to add it later.</p>
+                                    </div>
+                                    <button className="shrink-0 text-sm font-semibold text-spruce underline underline-offset-4" onClick={() => setIncomeDrafts((entries) => [...entries, { name: "", amount: "", day: "" }])} type="button">Add income</button>
+                                </div>
+                                {incomeDrafts.map((entry, index) => (
+                                    <div className="grid gap-3 border-l-2 border-spruce/30 pl-4 sm:grid-cols-[1.2fr_1fr_0.7fr_auto] sm:items-end" key={index}>
+                                        <label className="grid gap-2 text-sm font-semibold">Name
+                                            <input className="h-11 border border-ink/20 bg-canvas px-3 outline-none ring-spruce focus:ring-2" name={`incomeName${index}`} onChange={(event) => setIncomeDrafts((entries) => entries.map((item, itemIndex) => itemIndex === index ? { ...item, name: event.target.value } : item))} placeholder="Salary" value={entry.name} />
+                                        </label>
+                                        <label className="grid gap-2 text-sm font-semibold">Amount (EUR)
+                                            <input className="h-11 border border-ink/20 bg-canvas px-3 outline-none ring-spruce focus:ring-2" min="0.01" name={`incomeAmount${index}`} onChange={(event) => setIncomeDrafts((entries) => entries.map((item, itemIndex) => itemIndex === index ? { ...item, amount: event.target.value } : item))} placeholder="0.00" step="0.01" type="number" value={entry.amount} />
+                                        </label>
+                                        <label className="grid gap-2 text-sm font-semibold">Pay day
+                                            <input className="h-11 border border-ink/20 bg-canvas px-3 outline-none ring-spruce focus:ring-2" max="31" min="1" name={`incomeDay${index}`} onChange={(event) => setIncomeDrafts((entries) => entries.map((item, itemIndex) => itemIndex === index ? { ...item, day: event.target.value } : item))} placeholder="1-31" type="number" value={entry.day} />
+                                        </label>
+                                        <button aria-label="Remove income" className="h-11 px-2 text-sm font-semibold text-red-700 underline underline-offset-4" onClick={() => setIncomeDrafts((entries) => entries.filter((_, itemIndex) => itemIndex !== index))} type="button">Remove</button>
+                                    </div>
+                                ))}
+                            </fieldset>
+
+                            <fieldset className="grid gap-4">
+                                <legend className="text-xl font-semibold">Monthly bills</legend>
+                                <div className="flex items-center justify-between gap-4">
+                                    <div>
+                                        <p className="mt-1 text-sm text-ink/60">Add required recurring bills; one-off costs can be logged later.</p>
+                                    </div>
+                                    <button className="shrink-0 text-sm font-semibold text-spruce underline underline-offset-4" onClick={() => setBillDrafts((entries) => [...entries, { name: "", amount: "", day: "" }])} type="button">Add bill</button>
+                                </div>
+                                {billDrafts.map((entry, index) => (
+                                    <div className="grid gap-3 border-l-2 border-clay/40 pl-4 sm:grid-cols-[1.2fr_1fr_0.7fr_auto] sm:items-end" key={index}>
+                                        <label className="grid gap-2 text-sm font-semibold">Name
+                                            <input className="h-11 border border-ink/20 bg-canvas px-3 outline-none ring-spruce focus:ring-2" name={`billName${index}`} onChange={(event) => setBillDrafts((entries) => entries.map((item, itemIndex) => itemIndex === index ? { ...item, name: event.target.value } : item))} placeholder="Rent" value={entry.name} />
+                                        </label>
+                                        <label className="grid gap-2 text-sm font-semibold">Amount (EUR)
+                                            <input className="h-11 border border-ink/20 bg-canvas px-3 outline-none ring-spruce focus:ring-2" min="0.01" name={`billAmount${index}`} onChange={(event) => setBillDrafts((entries) => entries.map((item, itemIndex) => itemIndex === index ? { ...item, amount: event.target.value } : item))} placeholder="0.00" step="0.01" type="number" value={entry.amount} />
+                                        </label>
+                                        <label className="grid gap-2 text-sm font-semibold">Due day
+                                            <input className="h-11 border border-ink/20 bg-canvas px-3 outline-none ring-spruce focus:ring-2" max="31" min="1" name={`billDay${index}`} onChange={(event) => setBillDrafts((entries) => entries.map((item, itemIndex) => itemIndex === index ? { ...item, day: event.target.value } : item))} placeholder="1-31" type="number" value={entry.day} />
+                                        </label>
+                                        <button aria-label="Remove bill" className="h-11 px-2 text-sm font-semibold text-red-700 underline underline-offset-4" onClick={() => setBillDrafts((entries) => entries.filter((_, itemIndex) => itemIndex !== index))} type="button">Remove</button>
+                                    </div>
+                                ))}
+                            </fieldset>
+
+                            <fieldset className="grid gap-4 border-t border-ink/10 pt-6">
+                                <legend className="text-xl font-semibold">Protect what matters</legend>
+                                <div className="grid gap-4 sm:grid-cols-2">
+                                    <label className="grid gap-2 text-sm font-semibold" htmlFor="setupInvestment">Monthly investment (EUR)
+                                        <input className="h-11 border border-ink/20 bg-canvas px-3 outline-none ring-spruce focus:ring-2" defaultValue="0.00" id="setupInvestment" min="0" name="monthlyInvestment" required step="0.01" type="number" />
+                                    </label>
+                                    <label className="grid gap-2 text-sm font-semibold" htmlFor="setupReserve">Safety reserve (EUR)
+                                        <input className="h-11 border border-ink/20 bg-canvas px-3 outline-none ring-spruce focus:ring-2" defaultValue="0.00" id="setupReserve" min="0" name="safetyReserve" required step="0.01" type="number" />
+                                    </label>
+                                </div>
+                            </fieldset>
+
+                            <div className="grid gap-3 border-t border-ink/10 pt-6">
+                                <button className="h-12 bg-spruce px-5 font-semibold text-white transition hover:bg-ink disabled:cursor-not-allowed disabled:opacity-60" disabled={onboardingMutation.isPending} type="submit">
+                                    {onboardingMutation.isPending ? "Saving your plan..." : "Save plan"}
+                                </button>
+                                {onboardingError ? <p className="text-sm text-red-700">{onboardingError}</p> : null}
+                                {onboardingMutation.isError ? <p className="text-sm text-red-700">{onboardingMutation.error.message}</p> : null}
+                            </div>
                         </form>
                     </section>
                 ) : (
