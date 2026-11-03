@@ -1,23 +1,23 @@
 {
-  "extends": "@centwise/config-typescript/nextjs.json",
-  "compilerOptions": {
-    "baseUrl": ".",
-    "ignoreDeprecations": "6.0",
-    "paths": {
-      "@/*": [
-        "./src/*"
-      ]
+    "extends": "@centwise/config-typescript/nextjs.json",
+    "compilerOptions": {
+        "baseUrl": ".",
+        "ignoreDeprecations": "6.0",
+        "paths": {
+            "@/*": [
+                "./src/*"
+            ]
+        },
+        "noEmit": true,
+        "esModuleInterop": true
     },
-    "noEmit": true,
-    "esModuleInterop": true
-  },
-  "include": [
-    "next-env.d.ts",
-    "**/*.ts",
-    "**/*.tsx",
-    ".next/types/**/*.ts"
-  ],
-  "exclude": [
-    "node_modules"
-  ]
+    "include": [
+        "next-env.d.ts",
+        "**/*.ts",
+        "**/*.tsx",
+        ".next/types/**/*.ts"
+    ],
+    "exclude": [
+        "node_modules"
+    ]
 }

@@ -4,6 +4,7 @@ node_modules/
 dist/
 .expo/
 coverage/
+*.tsbuildinfo
 .env
 .env.*
 !.env.example

@@ -3,10 +3,10 @@
     "version": "0.1.0",
     "private": true,
     "scripts": {
-        "build": "next build",
-        "dev": "next dev",
+        "build": "node --env-file=../../.env ./node_modules/next/dist/bin/next build",
+        "dev": "node --env-file=../../.env ./node_modules/next/dist/bin/next dev",
         "lint": "eslint .",
-        "start": "next start",
+        "start": "node --env-file=../../.env ./node_modules/next/dist/bin/next start",
         "typecheck": "tsc --noEmit"
     },
     "dependencies": {
@@ -14,19 +14,26 @@
         "@centwise/database": "workspace:*",
         "@centwise/design-tokens": "workspace:*",
         "@tanstack/react-query": "^5.62.11",
+        "bcryptjs": "^2.4.3",
+        "drizzle-orm": "^0.36.4",
+        "jose": "^5.10.0",
         "next": "^15.1.2",
         "react": "19.3.0",
         "react-dom": "19.3.0",
-        "zustand": "^5.0.2"
+        "zustand": "^5.0.2",
+        "zod": "^3.24.1"
     },
     "devDependencies": {
         "@centwise/config-eslint": "workspace:*",
         "@centwise/config-typescript": "workspace:*",
+        "@types/bcryptjs": "^2.4.6",
         "@types/node": "^22.10.2",
         "@types/react": "19.3.0",
         "@types/react-dom": "19.3.0",
+        "autoprefixer": "^10.4.20",
         "eslint": "^9.17.0",
         "eslint-config-next": "^15.1.2",
+        "postcss": "^8.4.49",
         "tailwindcss": "^3.4.17",
         "typescript": "6.0.3"
     }

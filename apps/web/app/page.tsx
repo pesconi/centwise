@@ -1,5 +1,5 @@
-import { colors } from "@centwise/design-tokens";
+import { FinanceDashboard } from "@/components/finance-dashboard";
 
 export default function HomePage() {
-    return <main style={{ color: colors.neutral[900] }}>Centwise</main>;
+    return <FinanceDashboard />;
 }
