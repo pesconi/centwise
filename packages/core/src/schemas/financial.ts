@@ -23,6 +23,10 @@ export const accountSchema = z.object({
     currency: currencySchema
 });
 
+export const accountUpdateSchema = accountSchema.partial().extend({
+    isActive: z.boolean().optional()
+}).refine((value) => Object.keys(value).length > 0, "At least one account field is required.");
+
 export const recurringIncomeSchema = z.object({
     name: nameSchema,
     amountInCents: z.number().int().positive(),
@@ -37,5 +41,6 @@ export const recurringBillSchema = z.object({
 
 export type FinancialSettingsInput = z.infer<typeof financialSettingsSchema>;
 export type AccountInput = z.infer<typeof accountSchema>;
+export type AccountUpdateInput = z.infer<typeof accountUpdateSchema>;
 export type RecurringIncomeInput = z.infer<typeof recurringIncomeSchema>;
 export type RecurringBillInput = z.infer<typeof recurringBillSchema>;
