@@ -303,8 +303,9 @@ Use this prompt to continue:
 Continue the Centwise work in C:\projects\centwise. First read AGENTS.md,
 docs/SESSION-HANDOFF-2026-11-04.md, and docs/IMPORT-AUTOMATION-PLAN.md. Then inspect
 the branch, git status, and latest commit; the expected starting point is main at
-917d712 (Fix recurring income month boundary). Preserve any local work and do not
-assume the expected state if the repository differs.
+functional baseline 917d712 (Fix recurring income month boundary), possibly with
+a later handoff-only documentation commit on top. Preserve any local work and do
+not assume the expected state if the repository differs.
 
 Implement only the next narrow slice: durable user decisions for the existing
 read-only cross-source/manual duplicate suggestions. Before editing, trace the
