@@ -4,6 +4,8 @@ import { importPostingBlockers } from "@centwise/core";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FormEvent, useState } from "react";
 
+import { BankStatementUpload } from "@/components/bank-statement-upload";
+
 interface ImportSource {
   sourceType: string;
   sourceEventKey: string;
@@ -284,8 +286,9 @@ export function ImportInbox() {
             <section className="mb-8 border-l-4 border-clay bg-white p-5 shadow-[0_20px_50px_-32px_rgba(23,33,29,0.45)]">
               <h2 className="font-semibold">Posting is disabled</h2>
               <p className="mt-1 text-sm text-ink/70">
-                Balance-date and settlement policies are decided. Imported candidates
-                still cannot create transactions until reconciliation and atomic approval are implemented.
+                Balance-date and settlement policies are decided. Imported
+                candidates still cannot create transactions until reconciliation
+                and atomic approval are implemented.
               </p>
               <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-ink/70">
                 {(
@@ -295,6 +298,10 @@ export function ImportInbox() {
                 ))}
               </ul>
             </section>
+
+            {accountsQuery.isSuccess ? (
+              <BankStatementUpload accounts={accountsQuery.data.accounts} />
+            ) : null}
 
             {candidatesQuery.isLoading || accountsQuery.isLoading ? (
               <p className="py-12 text-center text-ink/60">
@@ -314,8 +321,8 @@ export function ImportInbox() {
                   No import candidates yet
                 </h2>
                 <p className="mt-2 text-sm text-ink/60">
-                  Authenticated source-event intake is available; Android
-                  capture and PDF processing are not part of this phase.
+                  No persistent inbox candidates are available. PDF extraction
+                  above returns an in-memory preview only.
                 </p>
               </section>
             ) : null}

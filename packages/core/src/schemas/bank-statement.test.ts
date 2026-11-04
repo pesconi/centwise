@@ -156,6 +156,37 @@ describe("validateBankStatementExtraction", () => {
       expect(result.items).toHaveLength(2);
       expect(result.items[0]?.index).toBe(0);
       expect(result.items[1]?.index).toBe(1);
+      expect(result.items[0]?.reviewFlags).toContain(
+        "possible_duplicate_in_statement",
+      );
+      expect(result.items[1]?.reviewFlags).toContain(
+        "possible_duplicate_in_statement",
+      );
+    }
+  });
+
+  it("flags possible internal transfers without changing candidate direction", () => {
+    const result = validateBankStatementExtraction({
+      transactions: [
+        statementRow({
+          transaction: {
+            amountInCents: 2_450,
+            currency: "EUR",
+            type: "expense",
+            occurredAt: "2026-02-28T10:15:00+01:00",
+            description: "Transfer to own account",
+          },
+        }),
+      ],
+    });
+
+    expect(result.success).toBe(true);
+
+    if (result.success) {
+      expect(result.items[0]).toMatchObject({
+        status: "needs_review",
+        reviewFlags: ["possible_internal_transfer"],
+      });
     }
   });
 

@@ -2,6 +2,7 @@ export const importPostingBlockers = [
   "Transactional import approval has not been implemented.",
   "Recurring obligation settlement and reconciliation have not been implemented.",
   "Accounts without an opening-balance effective date require confirmation before future posting.",
+  "Card statements and suspected internal transfers require separate reconciliation.",
 ];
 
 export interface ImportCandidateReviewFields {

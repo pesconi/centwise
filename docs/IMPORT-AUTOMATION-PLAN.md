@@ -1,7 +1,7 @@
 # Bank message and PDF import plan
 
 Date: 2026-11-04
-Status: reviewed-inbox foundation implemented; capture and document ingestion remain planned.
+Status: reviewed-inbox foundation and authenticated, preview-only PDF reads implemented; mobile capture and posting remain planned.
 
 ## Confirmed scope
 
@@ -18,10 +18,10 @@ Status: reviewed-inbox foundation implemented; capture and document ingestion re
 - Web authentication uses an HTTP-only session cookie; mobile needs a deliberately implemented authenticated session and device lifecycle.
 - Existing transactions require an owned account. Recurring bills/income are forecasts, not payment records.
 - The spending engine deducts remaining recurring bills independently of recorded transactions. Imported payments must not cause both a transaction deduction and the same forecast deduction.
-- No document storage, background worker, or reconciliation model exists yet.
+- No document storage or background worker exists. Recurring occurrences and settlement links are implemented, but import approval still needs duplicate/reconciliation policy and atomic posting.
 - New accounts have an explicit start-of-day UTC opening-balance boundary; legacy accounts retain a null
   date until balance/date confirmation. Pre-boundary movements are history only, never additional cash.
-- The web inbox now persists authenticated source events and review candidates with exact-event retry idempotency. It does not ingest Android messages or documents.
+- The web inbox persists authenticated source events and review candidates with exact-event retry idempotency. A separate PDF flow now tracks read metadata and returns extraction previews without persisting PDFs or extracted candidates.
 
 ## Target flow
 
@@ -139,31 +139,38 @@ Acceptance on a real Android device: synthetic SMS/notification, multipart SMS, 
 permission denial/revocation, app restart, and duplicate SMS+notification all behave as documented.
 No bank credentials or accessibility-service scraping is required.
 
-## 3. PDF import with local AI
+## 3. PDF import and review
 
-- Add authenticated upload with owned account selection, source/document type, and statement period.
-- Validate PDF content/signature and configured size/page limits before processing; enforce resource
-  limits and isolate parsing. Do not execute embedded scripts or follow embedded links.
-- Store originals privately outside public assets, with ownership-enforced retrieval/deletion.
-- Use an asynchronous persisted job with explicit progress, retries, and cancellation/failure status.
-- Extract selectable text first; use local OCR for scanned pages. Report encrypted/unreadable documents
-  explicitly rather than pretending extraction succeeded.
-- Run extraction with a locally hosted model on the self-hosted server. Choose model/runtime after a
-  hardware and synthetic-document quality check; do not send financial documents to external services.
-- Treat document text as untrusted data, never instructions. Give the extractor no tools or write access.
-- Require schema-constrained output and validate cents, currency, dates, direction, account association,
-  totals, and row types. Preserve page/evidence references for each suggested item.
-- Separate opening/closing balances, subtotals, transactions, forecasts, and statement payments.
-  Do not import summary amounts as additional movements.
-- Exact file hashes make reuploads idempotent; overlapping statement periods need transaction-level
-  reconciliation, not merely file deduplication.
-- Preview/correct/approve extracted items in the same inbox as message candidates.
-- Set explicit retention/deletion rules for originals, extracted text, local queue, and evidence.
-  Keep raw financial content out of logs, telemetry, repository fixtures, and external services.
+The first slice is an authenticated, read-only bank-statement preview using the user's preferred
+OpenAI API. It validates the active account and PDF signature, sends bytes directly to the Responses
+API with `store: false`, and gives the model no tools or write access. Document contents are untrusted
+input, not instructions. The original PDF and extracted transaction values are not persisted; the
+browser holds candidates only for the current page view, while the database stores read metadata.
 
-Acceptance: selectable-text and scanned fixtures, overlapping/reuploaded statements, invalid files,
-encrypted documents, incorrect totals, and instruction-like PDF text produce correct candidates
-or explicit review/failure states, never silent financial postings.
+The current slice returns explicit failure states for unsupported document types, provider errors, and
+invalid schema output. Incomplete rows remain reviewable; malformed rows and non-EUR amounts are
+invalid. Transfer-like rows and same-direction/EUR-amount/UTC-date matches are flagged, but no rows are
+removed. Selected files are processed sequentially. There is no product cap on number of files or PDF
+pages; technical safeguards are a 20 MiB per-file maximum, 90-second provider timeout, two concurrent
+reads per server process, and 12,000 output tokens. Large statements may fail explicitly if the provider
+cannot complete within these limits; never treat truncated output as success.
+
+Future work, before any posting:
+
+- Reconcile overlaps and likely duplicates against other import sources and manually entered
+  transactions. Similarity must prompt review, never merge transactions based only on amount/date.
+- Detect and distinguish posted account movements from opening/closing balances, subtotals, forecasts,
+  card settlements, and internal transfers.
+- Add correction and provenance handling for persistent PDF candidates only if the product explicitly
+  needs those values retained. Keep original PDFs and extracted text out of storage, logs and telemetry.
+- Test synthetic selectable-text, scanned, encrypted/unreadable, malformed, overlapping, and instruction-
+  like PDFs. Do not use real statements or credentials during development.
+- Keep OpenAI credentials server-side. Confirm provider data-retention terms before processing real
+  statements in production.
+
+Acceptance: malformed files, provider timeouts, uncertain rows, repeated rows, unsupported currencies,
+and instruction-like PDF text produce review/failure states, never silent partial results or financial
+postings. Retry of an identical failed request must update one read record, not create financial data.
 
 ## 4. Recurring-spend prediction
 
@@ -181,10 +188,11 @@ or explicit review/failure states, never silent financial postings.
 
 ## Delivery order and validation
 
-1. The approved balance-date and occurrence/settlement slices are implemented. Next add cross-source and
-   manual-transaction duplicate review/reconciliation, then separately verify atomic and concurrent posting.
+1. The approved balance-date and occurrence/settlement slices and the first PDF preview slice are
+   implemented. Next add cross-source/manual duplicate review and reconciliation, then separately verify
+   atomic and concurrent posting.
 2. Mobile authentication and one known bank's SMS format, then notification capture and offline sync.
-3. PDF upload, local extraction/OCR/AI, and inbox preview; card posting remains gated.
+3. Expand PDF review/reconciliation; card posting remains gated.
 4. Recurrence suggestions and only then opt-in automation.
 
 Implement one validated, documented commit-sized slice per session. No broad mobile parity or
@@ -201,15 +209,22 @@ Apply generated migrations to local PostgreSQL before committing schema changes.
 - First bank application/sender and synthetic examples of its message formats.
 - Card/transfer accounting behavior (balance-date and settlement semantics are approved above).
 - Android device/version and backend connectivity while away from home.
-- Server RAM/CPU/GPU for local OCR/model selection and extraction throughput.
-- Explicit upload limits and retention periods.
+- OpenAI account data-retention terms and production processing policy before using real statements.
 
-Recommended next session: visually validate the occurrence settlement UI, then continue the bank
-statement slice with authenticated file-read tracking and safe, non-persisted PDF processing in preview
-mode. The user expressed a preference for the OpenAI API, which conflicts with the current local-model
-privacy constraint; resolve that boundary before transmitting statement content. Do not process real
-documents during development or make PDF resource limits unbounded. Keep import approval blocked until
-duplicate ambiguity, reconciliation and atomic/concurrent posting are fully verified.
+The current PDF preview has no product cap on file count or page count. Technical safeguards are 20 MiB
+per file, a 90-second provider timeout, at most two simultaneous reads per server process, and a 12,000
+token output ceiling; provider-specific constraints may also apply. The uploaded PDF is sent directly
+to the OpenAI Responses API with `store: false`. The server stores only sanitized filename, file size,
+SHA-256 request fingerprint, status, counts, and retry metadata. It stores neither PDF bytes nor
+extracted transaction values. Previews exist only in the browser until leaving the page.
+
+Use synthetic PDFs only in development and never use real statements or credentials in tests. OpenAI
+credentials stay server-side. Card/bill PDFs are rejected by the preview flow; suspected transfers and
+same-date/amount rows are flagged for review, not removed or posted. Inbox approval remains blocked.
+
+Recommended next session: continue from the latest handoff section. Keep posting disabled; any future
+work that persists candidates must separately define duplicate/reconciliation review and atomic,
+repeat-safe approval. Mobile capture and card accounting remain separate slices.
 
 ## Platform references
 
@@ -226,7 +241,28 @@ are rejected for correction. The extractor cannot select an owned account or rec
 Equal amount/date rows remain separate, and validation never writes transactions or approves inbox
 candidates.
 
-This does not yet read PDFs or call a model. The user expressed a preference for the OpenAI API, which
-needs reconciliation with the established local-model/privacy constraint before any statement content
-is transmitted. The requested file-read status table, review UI/category persistence, transaction
-posting, expense reports, and recurrence analysis remain future work. Approval stays blocked.
+This contract is now used by the authenticated PDF preview flow documented below. Extraction remains
+read-only: account ownership comes from the authenticated session and the selected active account is
+validated server-side. The model cannot assign accounts or occurrence IDs. Rows with equal direction,
+EUR amount, and UTC date are retained and flagged as possible duplicates; transfer-like descriptions
+are flagged for review. Neither flag approves a row or changes posting state.
+
+## Authenticated PDF preview slice (2026-11-04)
+
+The `/api/bank-statement-reads` route accepts one PDF body per authenticated request. It checks active
+account ownership, content type, PDF signature, request-key idempotency, and a bounded byte stream
+before calling the OpenAI Responses API. Provider output is schema-validated and returned as an
+in-memory preview. Failed requests can be retried with the same request key and identical file/account;
+completed keys cannot create another preview. Different content under the same key conflicts.
+
+`bank_statement_reads` persists file metadata and processing state only. It has a user-scoped unique
+request key and never stores uploaded bytes, extracted rows, or financial records. The browser processes
+selected PDFs sequentially and shows read status, retry count, and candidate previews. No amount/date
+deduplication, recurrence-rule creation, inbox approval, transaction write, card posting, or transfer
+posting is enabled. Migration `0004_public_lilith` adds only this metadata table.
+
+The key is `OPENAI_API_KEY` and remains server-side; `OPENAI_BANK_STATEMENT_MODEL` defaults to
+`gpt-4.1-mini`. Requests use structured JSON output, `store: false`, a 90-second timeout, at most two
+active reads per server process, and 12,000 output tokens. There is no product cap on file count or PDF
+pages. The 20 MiB per-file limit is a technical memory/request safeguard; the timeout and output ceiling
+bound provider work, and unusually large statements can fail explicitly rather than return partial success.

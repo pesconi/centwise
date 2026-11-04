@@ -4,7 +4,10 @@ import {
   importCandidateCreateSchema,
   importCandidateUpdateSchema,
 } from "./import-candidate";
-import { getImportCandidateValidationIssues } from "../utils/import-candidate";
+import {
+  getImportCandidateValidationIssues,
+  importPostingBlockers,
+} from "../utils/import-candidate";
 
 const validEvent = {
   sourceType: "bank_notification",
@@ -74,5 +77,14 @@ describe("import candidate schemas", () => {
         occurredAt: null,
       }),
     ).toEqual(["amount", "currency", "direction", "date", "account"]);
+  });
+
+  it("keeps card statements and suspected internal transfers blocked", () => {
+    expect(importPostingBlockers).toContain(
+      "Card statements and suspected internal transfers require separate reconciliation.",
+    );
+    expect(importPostingBlockers).toContain(
+      "Transactional import approval has not been implemented.",
+    );
   });
 });

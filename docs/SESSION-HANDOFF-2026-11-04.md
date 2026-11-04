@@ -7,6 +7,7 @@ Date: 2026-11-04
 Centwise is a pnpm/Turborepo monorepo for a self-hosted personal-finance app. Its central question is: "How much can I freely spend this month?" Money is integer cents and the product currency is EUR. User ownership must always come from the server session.
 
 Completed and committed:
+
 - `1c8f6a5` Add agent workflow guide
 - `a7ecbf5` Enforce account-linked EUR transactions
 - `a0dc30b` Add free-to-spend calculation
@@ -14,7 +15,7 @@ Completed and committed:
 
 The onboarding collects an opening account balance when needed, optional monthly recurring income and bills, monthly investments, and safety reserve. The onboarding endpoint writes these records atomically. The authenticated free-to-spend endpoint feeds the dashboard.
 
-The pure calculation engine is in `packages/core/src/utils/free-to-spend.ts`, with tests in `packages/core/src/utils/free-to-spend.test.ts`. It calculates liquid balance from effective active opening balances and eligible transactions through `asOf`, then applies remaining recurring income, bills due today or later, the full monthly investment, and safety reserve. Calendar calculations use UTC. See the latest balance-date slice below for the implemented history boundary and the still-pending settlement policies.
+The pure calculation engine is in `packages/core/src/utils/free-to-spend.ts`, with tests in `packages/core/src/utils/free-to-spend.test.ts`. It calculates liquid balance from effective active opening balances and eligible transactions through `asOf`, then applies remaining recurring income, bills due today or later, the full monthly investment, and safety reserve. Calendar calculations use UTC. The opening-balance and monthly settlement semantics are implemented below.
 
 ## Working Tree
 
@@ -42,9 +43,9 @@ The shared import inbox is available at `/imports`. `import_sources` stores user
 
 Authenticated source intake uses the web session, not a browser-supplied user ID. The unique `(user_id, source_type, source_event_key)` key and transactionally created single candidate make exact retries concurrency-safe. Reusing the same key with changed source/candidate data returns `409`; different event keys remain separate even for equal amount/date. There is deliberately no fuzzy or cross-source duplicate linking yet, so one purchase received through separate channels may still appear twice.
 
-The inbox supports correcting amount, direction, date, description, and account, and rejecting with an optional reason. Posting is not available: `POST /api/import-candidates/{id}/approve` returns `409`, and the database constraint prevents changing the posting state. The policies are now approved below, but settlement/reconciliation and atomic approval must still be implemented before posting can be enabled. Card accounting remains out of scope.
+The inbox supports correcting amount, direction, date, description, and account, and rejecting with an optional reason. Posting is not available: `POST /api/import-candidates/{id}/approve` returns `409`, and the database constraint prevents changing the posting state. Settlement is implemented, but import reconciliation and atomic approval must still be completed before posting can be enabled. Card accounting remains out of scope.
 
-No Android capture/device authentication, PDF upload, OCR, local AI extraction, or transaction posting was added. The endpoint accepts authenticated source events only; it is a foundation, not an ingestion implementation. Synthetic API checks covered parallel retries, distinct equal-value events, changed-payload conflicts, user/account isolation, correction, repeat rejection, and the posting block. The authenticated inbox was visually checked with synthetic data. Migration `0001_magical_shiva` was applied to the local PostgreSQL container.
+At this foundation stage, Android capture, PDF upload, OCR, local AI extraction, and transaction posting were not added. The endpoint accepted authenticated source events only. Synthetic API checks covered parallel retries, distinct equal-value events, changed-payload conflicts, user/account isolation, correction, repeat rejection, and the posting block. The authenticated inbox was visually checked with synthetic data. Migration `0001_magical_shiva` was applied to the local PostgreSQL container.
 
 ## Validation and Delivery
 
@@ -164,45 +165,74 @@ empty afterward.
 ### Validation and remaining limit
 
 - `pnpm --filter @centwise/database db:generate` generated `0003_flat_blade`; `pnpm --filter @centwise/database db:migrate`
-  applied it locally. The occurrence table exists and the local transaction table is empty after synthetic tests.
+  applied it locally. The occurrence table exists; the ledger was empty immediately after the earlier synthetic tests.
 - 26 focused unit tests passed for calculation, UTC date clamping, and transaction validation.
   Two HTTP integrations passed: occurrence materialization/settlement/ownership/concurrency and the existing
   opening-balance/import-posting-block regressions. `pnpm typecheck` passed for all 7 workspace packages.
 - Revalidation for this commit passed 26 focused unit tests and `pnpm typecheck`. The two HTTP integrations
   were skipped without a base URL; attempts against `localhost:3001` could not connect because the app
   server was unavailable. The shared browser shows onboarding, not the settlement controls.
-- Automated browser interaction timed out twice on the onboarding button. The current shared browser
-  still shows onboarding, not occurrence settlement controls, so visual validation of those controls
-  remains pending. The user explicitly requested committing the code despite this gap; the commit does
-  not claim visual approval.
+- Automated browser interaction timed out twice on the onboarding button. The current continuation
+  resolved this gap with an authenticated synthetic account; see the latest slice below.
 - Materialization is lazy and current-month-only on a plan fetch; there is no background job. There is no
   cross-source/manual duplicate resolution, so inbox posting remains disabled. Do not enable posting based
   on this slice alone.
 
-## Prompt For The Next Agent
+## Current continuation slice (2026-11-04)
 
-Continue in `C:\projects\centwise`. First read `AGENTS.md`, this handoff, and
-[the import automation plan](./IMPORT-AUTOMATION-PLAN.md), then inspect branch/status/recent commits.
-Do not modify or discard existing local changes. Preserve the approved UTC opening-balance and
-settlement semantics; do not re-ask those decisions.
+Commits at session start were `7fc8065` (synthetic extraction contract) and `b6fe66f` (monthly
+occurrences/settlement). Branch was `main`, clean, at `b6fe66f`; no local source edits existed before
+this slice.
 
-The current product request is to continue the bank-statement flow. The transaction-shaped extraction
-contract and synthetic tests are committed; monthly occurrences and explicit settlements are also
-implemented in the remaining code slice. Begin by visually validating the occurrence/payment UI with
-synthetic data, then implement the next small PDF-import slice: authenticated file-read tracking,
-safe PDF intake/temporary processing without retaining original documents, and preview-only candidates.
-Never let an extractor write financial records. Keep inbox approval, cards, and suspicious transfers
-blocked; do not deduplicate by amount/date or create recurring rules from suggestions.
+The settlement UI was visually validated on the local server with a newly registered synthetic
+`example.invalid` user. It showed both payment and receipt forms, income rescheduling/cancellation,
+and after a synthetic EUR 40 partial utility payment, the EUR 83.45 outstanding balance and explicit
+partial-settlement action. The 00:00 UTC opening date and cash/forecast arithmetic remained visible.
 
-The user expressed a preference for the OpenAI API, while the existing import plan specifies a local
-model and financial-document privacy. Resolve this provider boundary before transmitting any statement
-content. Do not use real statements or credentials during development. Do not make PDF resource limits
-unbounded: propose reasonable upload/page limits or ask the user to confirm them.
-Keep EUR integer cents, derive ownership from the session, preserve historical opening-balance behavior,
-and do not add conversion. Add synthetic extraction/validation, ownership, retries, duplicate-review,
-posting-block, and pre-opening-date regressions. Run focused tests and `pnpm typecheck`; apply and verify
-Drizzle migrations locally if schema changes are made. Validate the UI visually, commit only the
-intended slice, and do not push.
+The authenticated PDF preview is on `/imports`. `POST /api/bank-statement-reads` accepts one bounded
+PDF stream, derives user ownership from the session, validates the selected active account, and calls
+the OpenAI Responses API with server-only `OPENAI_API_KEY`, `store: false`, strict structured output,
+no tools, and untrusted-document instructions. PDF bytes exist only in request memory; extracted rows
+are returned to the browser and are not written to the inbox or database. `bank_statement_reads`
+stores sanitized filename, file size, an account-bound request fingerprint, status, candidate count,
+attempt count, and safe error code. It stores neither PDF bytes nor extracted values. Migration
+`0004_public_lilith` was generated and applied to local PostgreSQL.
+
+Retries reuse one user/request key and must have the same PDF, filename, and selected account. Failed
+reads increment the same row's attempt count; concurrent/incomplete reads return `409`; changed content
+conflicts; completed keys cannot replay the ephemeral preview. Candidate rows with same direction,
+EUR cents, and UTC date are flagged but both retained. Transfer-like text gets a review flag. Card/bill
+documents are refused; all posting remains blocked and no recurring rule is created.
+
+No product cap is imposed on file count or PDF pages. Technical limits: 20 MiB per file, 90 seconds per
+provider request, two simultaneous reads per server process, and 12,000 model output tokens. Truncated
+or invalid provider output is an explicit failure, never a partial success. The environment had no
+OpenAI credential configured, so HTTP tests verified the explicit provider-unavailable state and retry
+without making an external call. Provider parsing was unit-tested with a mocked synthetic response.
+Final focused validation passed: core tests (43 passed, 2 skipped), web tests (4 passed), workspace
+`pnpm typecheck`, and `git diff --check`.
+Do not use real statements or credentials during development; confirm provider retention terms before
+production processing.
+
+The local HTTP checks with synthetic data passed: first request `503` (no server key), retry `503` with
+attempt count 2 on one row, same-key/different-PDF `409`, unowned account `404`, second-user read
+isolation (zero rows), import approval `409`, and unchanged transaction count during PDF failures.
+Visual review covered the settlement dashboard and PDF upload/status states, including the failed-read
+table and disabled posting. Candidate-preview rows were validated by unit tests but not rendered in the
+browser because no OpenAI key was configured. A synthetic read metadata row, approval-blocker candidate,
+and visual/isolation users remain in the development database; no original PDFs or real financial data
+were used.
+
+## Next-session prompt
+
+Continue in `C:\projects\centwise`; read this handoff and
+[the import automation plan](./IMPORT-AUTOMATION-PLAN.md), then inspect git status and latest commit.
+Do not redo the visual settlement check or re-ask approved financial/provider decisions. Keep EUR cents,
+session-derived ownership, the UTC opening-balance boundary, and import posting blocked. The next slice
+should focus on cross-source/manual duplicate review and reconciliation before any approval work. Card
+accounting, suspicious internal transfers, mobile capture, and recurring suggestions remain gated.
+Use synthetic fixtures, run focused tests and `pnpm typecheck`, validate visually when the UI changes,
+commit only the validated slice, and do not push.
 
 ## Bank Statement Extraction Contract Foundation
 
@@ -210,5 +240,5 @@ intended slice, and do not push.
 - Each valid row is checked independently. Incomplete rows remain `needs_review`; malformed rows and non-EUR currency are explicitly invalid. No currency conversion, amount/date deduplication, transaction write, inbox approval, or recurring-rule creation occurs.
 - Category and recurrence values are suggestions only. Recurrence classifications are restricted to possible recurring, ordinary spend, or uncertain; no suggestion creates a rule or future occurrence. Evidence includes a page number and short excerpt. Confidence signals reflect field completeness, not a model's self-reported probability.
 - Synthetic contract tests cover valid endpoint-shaped rows, malformed/uncertain rows, unsupported currency, forbidden ownership/occurrence fields, and equal-value rows retained independently.
-- This is not PDF upload, PDF parsing, OCR, or AI integration. No PDF libraries or AI endpoint were added. Financial documents must not be sent to external AI services; choose a locally hosted model and safe resource/retention policy before implementing ingestion. The user requested no original-document persistence and a read-status table; those are not implemented yet.
-- The occurrence code and migration `0003_flat_blade` were local changes before the extraction-contract commit. Focused unit tests and workspace typecheck pass; the HTTP integrations could not run because no local app server was available, and dashboard settlement visual validation remains pending. The user explicitly requested committing this slice despite that visual limitation. Keep these validation gaps visible and do not enable import posting.
+- At the time this contract foundation was committed, it did not read PDFs or call a model. The authenticated OpenAI preview and metadata-only read table are now implemented in the continuation slice above.
+- The occurrence code and migration `0003_flat_blade` were local changes before the extraction-contract commit. Its earlier HTTP/browser validation gaps were resolved in the latest slice above. Import posting remains blocked.

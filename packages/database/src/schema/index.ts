@@ -1,4 +1,5 @@
 export { accounts } from "./accounts";
+export { bankStatementReads } from "./bank-statement-reads";
 export { financialSettings } from "./financial-settings";
 export { importCandidates } from "./import-candidates";
 export { importSources } from "./import-sources";
