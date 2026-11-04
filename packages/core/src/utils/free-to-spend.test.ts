@@ -42,7 +42,9 @@ describe("calculateFreeToSpend", () => {
             remainingBillsCents: 80_000,
             remainingInvestmentCents: 30_000,
             safetyReserveCents: 20_000,
-            freeToSpendCents: 210_000
+            freeToSpendCents: 210_000,
+            daysRemainingInMonth: 28,
+            dailySafeSpendCents: 7_500
         });
     });
 
@@ -55,6 +57,8 @@ describe("calculateFreeToSpend", () => {
 
         expect(result.remainingIncomeCents).toBe(0);
         expect(result.remainingBillsCents).toBe(20_000);
+        expect(result.daysRemainingInMonth).toBe(1);
+        expect(result.dailySafeSpendCents).toBe(80_000);
     });
 
     it("uses February 29 in a leap year when resolving dates after day 28", () => {
@@ -66,6 +70,7 @@ describe("calculateFreeToSpend", () => {
 
         expect(result.remainingIncomeCents).toBe(100_000);
         expect(result.remainingBillsCents).toBe(20_000);
+        expect(result.daysRemainingInMonth).toBe(2);
     });
 
     it("allows a negative result while excluding inactive accounts and their transactions", () => {
@@ -83,5 +88,16 @@ describe("calculateFreeToSpend", () => {
 
         expect(result.liquidBalanceCents).toBe(1_000);
         expect(result.freeToSpendCents).toBe(-5_000);
+        expect(result.dailySafeSpendCents).toBe(0);
+    });
+
+    it("starts a new daily allowance period on the first day of a new month", () => {
+        const result = calculateFreeToSpend(createInput({
+            asOf: new Date("2026-03-01T00:00:00.000Z"),
+            accounts: [{ id: "account-1", openingBalanceCents: 10_000, isActive: true }]
+        }));
+
+        expect(result.daysRemainingInMonth).toBe(31);
+        expect(result.dailySafeSpendCents).toBe(322);
     });
 });

@@ -40,6 +40,8 @@ export interface FreeToSpendResult {
     remainingInvestmentCents: number;
     safetyReserveCents: number;
     freeToSpendCents: number;
+    daysRemainingInMonth: number;
+    dailySafeSpendCents: number;
 }
 
 function getLastDayOfMonth(date: Date): number {
@@ -75,6 +77,10 @@ export function calculateFreeToSpend(input: FreeToSpendInput): FreeToSpendResult
         - remainingBillsCents
         - input.monthlyInvestmentCents
         - input.safetyReserveCents;
+    const daysRemainingInMonth = getLastDayOfMonth(input.asOf) - input.asOf.getUTCDate() + 1;
+    const dailySafeSpendCents = freeToSpendCents > 0
+        ? Math.floor(freeToSpendCents / daysRemainingInMonth)
+        : 0;
 
     return {
         liquidBalanceCents,
@@ -82,6 +88,8 @@ export function calculateFreeToSpend(input: FreeToSpendInput): FreeToSpendResult
         remainingBillsCents,
         remainingInvestmentCents: input.monthlyInvestmentCents,
         safetyReserveCents: input.safetyReserveCents,
-        freeToSpendCents
+        freeToSpendCents,
+        daysRemainingInMonth,
+        dailySafeSpendCents
     };
 }

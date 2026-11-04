@@ -33,6 +33,16 @@ interface FreeToSpendResult {
     remainingInvestmentCents: number;
     safetyReserveCents: number;
     freeToSpendCents: number;
+    daysRemainingInMonth: number;
+    dailySafeSpendCents: number;
+}
+
+interface ScheduledItem {
+    id: string;
+    name: string;
+    type: "income" | "bill";
+    amountInCents: number;
+    date: string;
 }
 
 interface PlanEntryDraft {
@@ -55,6 +65,14 @@ async function requestJson<T>(input: RequestInfo | URL, init?: RequestInit): Pro
 
 function formatCurrency(amountInCents: number, currency: string): string {
     return new Intl.NumberFormat("en-US", { style: "currency", currency }).format(amountInCents / 100);
+}
+
+function formatPlanDate(date: string): string {
+    return new Date(`${date}T00:00:00.000Z`).toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        timeZone: "UTC"
+    });
 }
 
 export function FinanceDashboard() {
@@ -102,7 +120,11 @@ export function FinanceDashboard() {
 
     const freeToSpendQuery = useQuery({
         queryKey: ["free-to-spend"],
-        queryFn: () => requestJson<{ calculation: FreeToSpendResult }>("/api/free-to-spend"),
+        queryFn: () => requestJson<{
+            calculation: FreeToSpendResult;
+            periodEndDate: string;
+            scheduledItems: ScheduledItem[];
+        }>("/api/free-to-spend"),
         enabled: Boolean(user)
     });
 
@@ -352,6 +374,8 @@ export function FinanceDashboard() {
         0
     );
     const calculation = freeToSpendQuery.data?.calculation;
+    const scheduledItems = freeToSpendQuery.data?.scheduledItems ?? [];
+    const periodEndDate = freeToSpendQuery.data?.periodEndDate;
     const requiresOnboarding = Boolean(user) && financialSettingsQuery.data?.isConfigured === false;
 
     return (
@@ -493,6 +517,18 @@ export function FinanceDashboard() {
                             <p className="text-sm font-semibold uppercase tracking-[0.14em] text-ink/55">Free to spend</p>
                             <p className={`mt-4 text-5xl font-semibold tracking-tight ${calculation && calculation.freeToSpendCents < 0 ? "text-red-700" : "text-ink"}`}>{calculation ? formatCurrency(calculation.freeToSpendCents, "EUR") : "--"}</p>
                             <p className="mt-3 text-sm text-ink/60">Current liquid balance: {formatCurrency(balanceInCents, "EUR")} across {accounts.length} active {accounts.length === 1 ? "account" : "accounts"}.</p>
+                            {calculation ? (
+                                <div className="mt-6 border-l-2 border-spruce/40 pl-4">
+                                    <p className="text-sm font-semibold uppercase tracking-[0.1em] text-spruce">Safe spending per day</p>
+                                    <p className={`mt-1 text-3xl font-semibold ${calculation.freeToSpendCents < 0 ? "text-red-700" : "text-ink"}`}>{formatCurrency(calculation.dailySafeSpendCents, "EUR")}</p>
+                                    <p className="mt-1 text-sm text-ink/60">
+                                        {calculation.freeToSpendCents < 0
+                                            ? `No safe spending room remains; the plan is short by ${formatCurrency(Math.abs(calculation.freeToSpendCents), "EUR")}.`
+                                            : `Per remaining calendar day through ${periodEndDate ? formatPlanDate(periodEndDate) : "month end"}, including today.`}
+                                    </p>
+                                    <p className="mt-1 text-xs text-ink/50">When positive, the available amount is spread across {calculation.daysRemainingInMonth} days and rounded down to cents. Dates follow UTC.</p>
+                                </div>
+                            ) : null}
                             {freeToSpendQuery.isError ? <p className="mt-3 text-sm text-red-700">{freeToSpendQuery.error.message}</p> : null}
 
                             {accounts.length === 0 ? (
@@ -552,33 +588,87 @@ export function FinanceDashboard() {
                             </form>
                         </section>
 
-                        <section className="bg-white/70 p-6 shadow-[0_20px_50px_-32px_rgba(23,33,29,0.45)] sm:p-8">
-                            <div className="mb-6 flex items-end justify-between border-b border-ink/10 pb-4">
-                                <div>
-                                    <h2 className="text-2xl font-semibold">Activity</h2>
-                                    <p className="mt-1 text-sm text-ink/60">Most recent transactions first.</p>
+                        <div className="grid gap-8">
+                            <section className="bg-white/70 p-6 shadow-[0_20px_50px_-32px_rgba(23,33,29,0.45)] sm:p-8">
+                                <div className="mb-6 border-b border-ink/10 pb-5">
+                                    <h2 className="text-2xl font-semibold">This month&apos;s plan</h2>
+                                    <p className="mt-1 text-sm text-ink/60">These amounts are already accounted for in free to spend.</p>
+                                    <dl className="mt-5 grid gap-3 sm:grid-cols-3">
+                                        <div className="bg-white p-4">
+                                            <dt className="text-sm text-ink/60">Bills still due</dt>
+                                            <dd className="mt-1 font-semibold">{calculation ? formatCurrency(calculation.remainingBillsCents, "EUR") : "--"}</dd>
+                                        </div>
+                                        <div className="bg-white p-4">
+                                            <dt className="text-sm text-ink/60">Monthly investment</dt>
+                                            <dd className="mt-1 font-semibold">{calculation ? formatCurrency(calculation.remainingInvestmentCents, "EUR") : "--"}</dd>
+                                        </div>
+                                        <div className="bg-white p-4">
+                                            <dt className="text-sm text-ink/60">Safety reserve</dt>
+                                            <dd className="mt-1 font-semibold">{calculation ? formatCurrency(calculation.safetyReserveCents, "EUR") : "--"}</dd>
+                                        </div>
+                                    </dl>
                                 </div>
-                                <span className="text-sm font-semibold text-spruce">{transactions.length} total</span>
-                            </div>
-                            {transactionsQuery.isLoading ? <p className="py-10 text-center text-ink/60">Loading transactions...</p> : null}
-                            {transactionsQuery.isError ? <p className="py-10 text-center text-red-700">{transactionsQuery.error.message}</p> : null}
-                            {!transactionsQuery.isLoading && !transactionsQuery.isError && transactions.length === 0 ? <p className="py-10 text-center text-ink/60">Your recorded activity will appear here.</p> : null}
-                            <ul className="divide-y divide-ink/10">
-                                {transactions.map((transaction) => (
-                                    <li className="flex items-center justify-between gap-4 py-4" key={transaction.id}>
-                                        <div className="min-w-0">
-                                            <p className="truncate font-semibold">{transaction.description ?? "Untitled transaction"}</p>
-                                            <p className="mt-1 text-sm text-ink/55">{new Date(transaction.occurredAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</p>
-                                        </div>
-                                        <div className="flex shrink-0 items-center gap-3">
-                                            <p className={`font-semibold ${transaction.type === "expense" ? "text-red-700" : "text-spruce"}`}>{transaction.type === "expense" ? "-" : "+"}{formatCurrency(transaction.amountInCents, transaction.currency)}</p>
-                                            <button aria-label={`Remove ${transaction.description ?? "transaction"}`} className="text-sm font-semibold text-ink/50 underline underline-offset-4 transition hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-50" disabled={deleteTransactionMutation.isPending} onClick={() => handleTransactionDelete(transaction.id)} type="button">Remove</button>
-                                        </div>
-                                    </li>
-                                ))}
-                            </ul>
-                            {deleteTransactionMutation.isError ? <p className="mt-4 text-sm text-red-700">{deleteTransactionMutation.error.message}</p> : null}
-                        </section>
+                                <div>
+                                    <div className="flex items-baseline justify-between gap-4">
+                                        <h3 className="text-xl font-semibold">Coming up</h3>
+                                        <span className="text-sm text-ink/55">Remaining income and bills</span>
+                                    </div>
+                                    {freeToSpendQuery.isLoading ? <p className="mt-4 text-sm text-ink/60">Loading your monthly plan...</p> : null}
+                                    {freeToSpendQuery.isError ? <p className="mt-4 text-sm text-red-700">{freeToSpendQuery.error.message}</p> : null}
+                                    {!freeToSpendQuery.isLoading && !freeToSpendQuery.isError && scheduledItems.length === 0 ? (
+                                        <p className="mt-4 text-sm text-ink/60">No more scheduled income or bills this month.</p>
+                                    ) : null}
+                                    {scheduledItems.length > 0 ? (
+                                        <ul className="mt-3 divide-y divide-ink/10">
+                                            {scheduledItems.map((item) => (
+                                                <li className="flex items-center justify-between gap-4 py-3" key={`${item.type}-${item.id}`}>
+                                                    <div className="min-w-0">
+                                                        <p className="truncate font-medium">{item.name}</p>
+                                                        <p className="text-sm text-ink/55">{item.type === "income" ? "Income" : "Bill"} - {formatPlanDate(item.date)}</p>
+                                                    </div>
+                                                    <p className={`shrink-0 font-semibold ${item.type === "income" ? "text-spruce" : "text-ink"}`}>
+                                                        {item.type === "income" ? "+" : "-"}{formatCurrency(item.amountInCents, "EUR")}
+                                                    </p>
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    ) : null}
+                                    {calculation ? (
+                                        <p className="mt-3 text-sm text-ink/60">
+                                            Remaining this month: {formatCurrency(calculation.remainingIncomeCents, "EUR")} income and {formatCurrency(calculation.remainingBillsCents, "EUR")} in bills.
+                                        </p>
+                                    ) : null}
+                                    {periodEndDate ? <p className="mt-1 text-xs text-ink/50">Plan runs through {formatPlanDate(periodEndDate)} (UTC).</p> : null}
+                                </div>
+                            </section>
+                            <section className="bg-white/70 p-6 shadow-[0_20px_50px_-32px_rgba(23,33,29,0.45)] sm:p-8">
+                                <div className="mb-6 flex items-end justify-between border-b border-ink/10 pb-4">
+                                    <div>
+                                        <h2 className="text-2xl font-semibold">Activity</h2>
+                                        <p className="mt-1 text-sm text-ink/60">Most recent transactions first.</p>
+                                    </div>
+                                    <span className="text-sm font-semibold text-spruce">{transactions.length} total</span>
+                                </div>
+                                {transactionsQuery.isLoading ? <p className="py-10 text-center text-ink/60">Loading transactions...</p> : null}
+                                {transactionsQuery.isError ? <p className="py-10 text-center text-red-700">{transactionsQuery.error.message}</p> : null}
+                                {!transactionsQuery.isLoading && !transactionsQuery.isError && transactions.length === 0 ? <p className="py-10 text-center text-ink/60">Your recorded activity will appear here.</p> : null}
+                                <ul className="divide-y divide-ink/10">
+                                    {transactions.map((transaction) => (
+                                        <li className="flex items-center justify-between gap-4 py-4" key={transaction.id}>
+                                            <div className="min-w-0">
+                                                <p className="truncate font-semibold">{transaction.description ?? "Untitled transaction"}</p>
+                                                <p className="mt-1 text-sm text-ink/55">{new Date(transaction.occurredAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</p>
+                                            </div>
+                                            <div className="flex shrink-0 items-center gap-3">
+                                                <p className={`font-semibold ${transaction.type === "expense" ? "text-red-700" : "text-spruce"}`}>{transaction.type === "expense" ? "-" : "+"}{formatCurrency(transaction.amountInCents, transaction.currency)}</p>
+                                                <button aria-label={`Remove ${transaction.description ?? "transaction"}`} className="text-sm font-semibold text-ink/50 underline underline-offset-4 transition hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-50" disabled={deleteTransactionMutation.isPending} onClick={() => handleTransactionDelete(transaction.id)} type="button">Remove</button>
+                                            </div>
+                                        </li>
+                                    ))}
+                                </ul>
+                                {deleteTransactionMutation.isError ? <p className="mt-4 text-sm text-red-700">{deleteTransactionMutation.error.message}</p> : null}
+                            </section>
+                        </div>
                     </div>
                 )}
             </div>
