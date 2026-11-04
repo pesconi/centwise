@@ -2,12 +2,16 @@ import { createHash } from "node:crypto";
 
 import { importCandidateCreateSchema } from "@centwise/core";
 import type { ImportCandidateCreateInput } from "@centwise/core";
-import { getImportCandidateValidationIssues, importPostingBlockers } from "@centwise/core";
+import {
+  getImportCandidateValidationIssues,
+  getImportDuplicateReviews,
+  importPostingBlockers,
+} from "@centwise/core";
 import { db, schema } from "@centwise/database";
-import { and, desc, eq } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
 
 import { getSessionUserId } from "@/server/auth";
+import { loadImportDuplicateContext } from "@/server/import-duplicate-review";
 
 export const dynamic = "force-dynamic";
 
@@ -58,44 +62,31 @@ export async function GET(): Promise<NextResponse> {
     );
   }
 
-  const rows = await db
-    .select({
-      candidate: schema.importCandidates,
-      source: {
-        sourceType: schema.importSources.sourceType,
-        sourceEventKey: schema.importSources.sourceEventKey,
-        capturedAt: schema.importSources.capturedAt,
-        parserVersion: schema.importSources.parserVersion,
-        evidence: schema.importSources.evidence,
-      },
-      account: {
-        id: schema.accounts.id,
-        name: schema.accounts.name,
-      },
-    })
-    .from(schema.importCandidates)
-    .innerJoin(
-      schema.importSources,
-      and(
-        eq(schema.importCandidates.sourceId, schema.importSources.id),
-        eq(schema.importSources.userId, userId),
-      ),
-    )
-    .leftJoin(
-      schema.accounts,
-      and(
-        eq(schema.importCandidates.accountId, schema.accounts.id),
-        eq(schema.accounts.userId, userId),
-      ),
-    )
-    .where(eq(schema.importCandidates.userId, userId))
-    .orderBy(desc(schema.importCandidates.createdAt));
+  const { rows, references } = await loadImportDuplicateContext(userId);
+  const duplicateReviews = getImportDuplicateReviews(
+    rows.map(({ candidate, account }) => ({
+      ...candidate,
+      accountId:
+        account &&
+        ["pending_review", "needs_information", "duplicate"].includes(candidate.status)
+          ? account.id
+          : null,
+    })),
+    references,
+  );
 
   return NextResponse.json({
-    candidates: rows.map(({ candidate, source, account }) => ({
+    candidates: rows.map(({ candidate, source, account }, index) => ({
       ...candidate,
-      source,
+      source: {
+        sourceType: source.sourceType,
+        sourceEventKey: source.sourceEventKey,
+        capturedAt: source.capturedAt,
+        parserVersion: source.parserVersion,
+        evidence: source.evidence,
+      },
       account,
+      duplicateReview: duplicateReviews[index],
     })),
     postingBlocked: true,
     postingBlockers: importPostingBlockers,

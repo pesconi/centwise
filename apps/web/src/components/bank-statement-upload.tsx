@@ -1,7 +1,9 @@
 "use client";
 
+import type { ImportDuplicateMatch } from "@centwise/core";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { FormEvent, useState } from "react";
+import { ImportDuplicateReview } from "@/components/import-duplicate-review";
 
 interface Account {
   id: string;
@@ -33,6 +35,7 @@ interface PreviewCandidate {
 }
 
 interface PreviewItem {
+  duplicateReview: ImportDuplicateMatch[];
   index: number;
   status: "invalid" | "needs_review" | "ready_for_review";
   candidate?: PreviewCandidate;
@@ -420,6 +423,7 @@ export function BankStatementUpload({ accounts }: { accounts: Account[] }) {
                       : "Possible internal transfer; verify before any future posting."}
                   </p>
                 ))}
+                <ImportDuplicateReview matches={item.duplicateReview} />
                 <p className="mt-1 text-sm text-ink/60">
                   Category: {item.categorySuggestion ?? "uncertain"} ·
                   Recurrence: {item.recurrenceSuggestion ?? "uncertain"}{" "}

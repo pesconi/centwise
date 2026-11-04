@@ -1,7 +1,7 @@
 # Bank message and PDF import plan
 
 Date: 2026-11-04
-Status: reviewed-inbox foundation and authenticated, preview-only PDF reads implemented; mobile capture and posting remain planned.
+Status: reviewed inbox, authenticated PDF previews and read-only duplicate suggestions implemented; durable duplicate decisions, mobile capture and posting remain planned.
 
 ## Confirmed scope
 
@@ -68,7 +68,8 @@ key with a changed payload conflicts; a different key is never merged based on a
 correction and rejection are available. Posting remains blocked in both the API and database until
 recurring-obligation reconciliation and atomic approval are implemented. The balance-date and settlement
 policies are now approved (see below); the opening-balance boundary is implemented. Cross-source
-duplicate linking, failed extraction records, and approval/posting are not implemented.
+duplicate linking and approval/posting are not implemented. Read-only cross-source/manual comparison
+suggestions and PDF failure metadata are implemented; see the latest slice below.
 
 ### Approved policy and current slice
 
@@ -157,8 +158,8 @@ cannot complete within these limits; never treat truncated output as success.
 
 Future work, before any posting:
 
-- Reconcile overlaps and likely duplicates against other import sources and manually entered
-  transactions. Similarity must prompt review, never merge transactions based only on amount/date.
+- Resolve overlaps explicitly after reviewing the implemented suggestions against other import sources
+  and manual transactions. Similarity must never merge transactions based only on amount/date.
 - Detect and distinguish posted account movements from opening/closing balances, subtotals, forecasts,
   card settlements, and internal transfers.
 - Add correction and provenance handling for persistent PDF candidates only if the product explicitly
@@ -189,8 +190,8 @@ postings. Retry of an identical failed request must update one read record, not 
 ## Delivery order and validation
 
 1. The approved balance-date and occurrence/settlement slices and the first PDF preview slice are
-   implemented. Next add cross-source/manual duplicate review and reconciliation, then separately verify
-   atomic and concurrent posting.
+   implemented, as are read-only cross-source/manual duplicate suggestions. Next define durable review
+   decisions and reconciliation, then separately verify atomic and concurrent posting.
 2. Mobile authentication and one known bank's SMS format, then notification capture and offline sync.
 3. Expand PDF review/reconciliation; card posting remains gated.
 4. Recurrence suggestions and only then opt-in automation.
@@ -266,3 +267,36 @@ The key is `OPENAI_API_KEY` and remains server-side; `OPENAI_BANK_STATEMENT_MODE
 active reads per server process, and 12,000 output tokens. There is no product cap on file count or PDF
 pages. The 20 MiB per-file limit is a technical memory/request safeguard; the timeout and output ceiling
 bound provider work, and unusually large statements can fail explicitly rather than return partial success.
+
+## Read-only duplicate review slice (2026-11-04)
+
+Inbox GET responses and successful PDF preview responses include `duplicateReview` comparisons against
+owned pending/needs-information/duplicate inbox candidates and the manual ledger. Matching requires
+the same account, EUR integer cents, direction and UTC day. An equal nonempty description normalized
+for Unicode, whitespace and case is an additional signal. Field-only coincidence is explicitly weaker:
+two equal purchases are retained, never silently suppressed. The UI shows the compared record, reason,
+amount/date and manual transaction ID or a link to the other inbox candidate's original evidence.
+
+This slice is entirely read-only. Suggestions do not set `status = duplicate`, persist relationships,
+resolve settlement, approve, reject, merge or remove records. They recompute on reads after corrections,
+rejections and ledger edits. Session-scoped source/account joins exclude foreign or malformed links
+from comparison evidence. Self/same-source, rejected, failed and approved candidates are excluded.
+There is no schema change and approval/posting remains blocked in both API and database, even when
+there are no matches or a description matches. Cards, suspected transfers and recurrence suggestions
+remain gated, and the opening-balance 00:00 UTC boundary is untouched.
+
+Validation passed 53 core tests (including the existing opening-balance/settlement HTTP regressions),
+five web tests (including local HTTP ownership, deliberately invalid links, updated comparisons and
+concurrent blocked approval), and workspace `pnpm typecheck`. A transient Next dev webpack failure and
+timeout on a combined rerun cleared when only those two HTTP regressions were rerun. Desktop browser
+counts and a 390px mobile screenshot verified the inbox comparisons and disabled posting. Successful
+PDF preview rendering was not visually verified: after a screenshot-scroll timeout and a browser-only
+fixture `Buffer` failure, automation stopped and interception was removed. No real documents or external
+provider calls were used. The new integration and visual fixtures were cleaned up.
+
+Limitations: no durable duplicate confirmation/dismissal or reconciliation workflow; no fuzzy merchant
+matching or cross-day/account matching; no comparison between discarded ephemeral PDF previews.
+No match is not proof of uniqueness. All current ledger records are manually entered; posting must
+introduce explicit provenance before that assumption changes. Owned histories are read without a
+product cap or silent truncation; scaling the comparison query is later work. No file/page limits or
+credential changes were introduced; existing PDF technical safeguards are unchanged.

@@ -223,13 +223,87 @@ browser because no OpenAI key was configured. A synthetic read metadata row, app
 and visual/isolation users remain in the development database; no original PDFs or real financial data
 were used.
 
+## Read-only cross-source/manual duplicate review (latest, 2026-11-04)
+
+Started on `main`, clean, at the expected `e29da5b` (`Add authenticated bank statement preview`).
+
+### Implemented and deliberately blocked
+
+- Inbox reads and successful ephemeral PDF previews now return `duplicateReview` suggestions against
+  owned inbox candidates and existing manual ledger transactions. Comparison requires the same owned
+  account, EUR integer cents, direction and **UTC calendar day**. Equal nonempty descriptions after
+  Unicode/whitespace/case normalization supply an additional signal, not a duplicate decision.
+- The UI explains field-only coincidence versus also-matching descriptions, shows comparison amounts,
+  dates and manual transaction IDs, and links to the other inbox candidate's original source evidence.
+  Legitimate equal purchases remain separate and editable. Neither suggestions nor comparisons change
+  candidate status, establish links, merge, reject, remove or approve anything.
+- The server derives ownership from the session. Source and account joins independently enforce
+  ownership before producing comparison evidence. Invalid source links are excluded; candidates with
+  invalid/missing account links have no suggestions and cannot supply comparison evidence. Rejected,
+  failed and approved candidates do not participate. Self/same-source comparisons are excluded.
+- Suggestions recalculate on a new read, so corrections, rejections and manual transaction edits are
+  reflected without storing potentially stale duplicate links. No schema migration was necessary.
+- Approval still returns `409` for matching and nonmatching candidates, card sources and suspected
+  transfers, including concurrent attempts. The database posting constraint is unchanged. No transaction,
+  recurrence, settlement or financial balance logic was enabled or changed; 00:00 UTC remains the
+  opening-balance boundary. The blocker text now distinguishes implemented settlement from unfinished
+  import duplicate decisions/reconciliation.
+
+### Validation
+
+- 53 focused core tests passed, including synthetic duplicate/nonmatch cases, UTC day boundaries,
+  incomplete/invalid fields, user isolation, extraction contracts, calculations and the two existing
+  opening-balance/settlement HTTP regressions. Five web tests passed: four mocked extraction tests and
+  one new local HTTP scenario exercising valid comparisons, changed/rejected candidates, edited manual
+  transactions, foreign accounts/owners, deliberately malformed source/account links, invalid occurrence
+  selection, concurrent blocked approvals, and unchanged ledger/candidate posting state.
+- `pnpm typecheck` passed across the workspace. Strict array-access errors in new tests were corrected.
+  A combined regression rerun encountered a transient Next development webpack `500` on an unchanged
+  account route and a settlement timeout during recompilation; both HTTP regressions subsequently
+  passed together in an isolated 4.68-second run. Do not mask those failures with product fallbacks.
+- Local server availability was checked before HTTP testing; this session started a temporary web
+  server on `http://localhost:3001` and stopped it after validation. Tests used only synthetic
+  `example.invalid` accounts and no real PDFs,
+  provider requests or credentials. The new HTTP test cleans up its own users and malformed fixtures;
+  the dedicated visual user's three candidates, one manual transaction and account were also removed.
+- Browser checks found three review panels, three manual references, six comparison links and three
+  disabled posting buttons at desktop width, with no horizontal overflow. A mobile screenshot at
+  390px confirmed readable comparison text and wrapped IDs without overflow.
+- A screenshot scroll timed out, then a later browser-only PDF fixture could not construct `Buffer`.
+  Automation stopped after those two failures and its request interception was removed. The shared
+  review component was visually checked in the inbox; successful PDF preview rendering remains
+  unverified in this slice. No provider credential was configured or requested to bypass that limit.
+
+To repeat the new HTTP scenario with a running local server (the database guard requires
+`localhost:5433/centwise`):
+
+```powershell
+Set-Location C:\projects\centwise\apps\web
+$env:CENTWISE_TEST_BASE_URL = "http://localhost:3001"
+node --env-file=..\..\.env node_modules\vitest\vitest.mjs run src\server\bank-statement-extraction.test.ts src\server\import-duplicate-review.integration.test.ts
+```
+
+### Limits and next boundary
+
+This is comparison assistance, not resolved duplicate reconciliation. No durable confirmation/dismissal
+workflow or atomic approval exists. Missing account/date/amount/direction, different UTC days or accounts,
+and spelling differences can prevent a stronger signal; absence of suggestions does not prove uniqueness.
+All current ledger transactions are user-entered; future posting must add explicit provenance rather
+than assume that remains true. Original PDFs and extracted previews are still not retained, so separate
+ephemeral PDF previews cannot be compared with each other after they disappear. No file/page product
+limits were added, and the previous technical PDF safeguards remain unchanged. Comparisons currently
+read the owned inbox/ledger into memory without truncation; large histories may require query-level
+indexing/pagination in a separate slice, not silent omission of evidence.
+
 ## Next-session prompt
 
 Continue in `C:\projects\centwise`; read this handoff and
 [the import automation plan](./IMPORT-AUTOMATION-PLAN.md), then inspect git status and latest commit.
 Do not redo the visual settlement check or re-ask approved financial/provider decisions. Keep EUR cents,
 session-derived ownership, the UTC opening-balance boundary, and import posting blocked. The next slice
-should focus on cross-source/manual duplicate review and reconciliation before any approval work. Card
+has delivered read-only cross-source/manual duplicate suggestions. A next slice can define explicit,
+durable review decisions and reconciliation before any approval work; do not treat these hints as
+resolved duplicates or posting permission. Card
 accounting, suspicious internal transfers, mobile capture, and recurring suggestions remain gated.
 Use synthetic fixtures, run focused tests and `pnpm typecheck`, validate visually when the UI changes,
 commit only the validated slice, and do not push.

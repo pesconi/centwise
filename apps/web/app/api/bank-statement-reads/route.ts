@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 import {
+  getImportDuplicateReviews,
   importPostingBlockers,
   validateBankStatementExtraction,
 } from "@centwise/core";
@@ -16,6 +17,7 @@ import {
   maxBankStatementPdfBytes,
 } from "@/server/bank-statement-extraction";
 import { getSessionUserId } from "@/server/auth";
+import { loadImportDuplicateContext } from "@/server/import-duplicate-review";
 
 export const dynamic = "force-dynamic";
 
@@ -413,6 +415,26 @@ async function processBankStatementRead(
     );
   }
 
+  const { references } = await loadImportDuplicateContext(userId);
+  const duplicateReviews = getImportDuplicateReviews(
+    validated.items.map((item) => ({
+      ...("candidate" in item
+        ? item.candidate
+        : {
+            accountId: null,
+            amountInCents: null,
+            currency: null,
+            type: null,
+            occurredAt: null,
+            description: null,
+          }),
+      id: null,
+      sourceId: null,
+      userId,
+    })),
+    references,
+  );
+
   const [completedRead] = await db
     .update(schema.bankStatementReads)
     .set({
@@ -431,7 +453,10 @@ async function processBankStatementRead(
 
   return NextResponse.json({
     read: toPublicRead(completedRead),
-    items: validated.items,
+    items: validated.items.map((item, index) => ({
+      ...item,
+      duplicateReview: duplicateReviews[index],
+    })),
     postingBlocked: true,
     postingBlockers: importPostingBlockers,
   });

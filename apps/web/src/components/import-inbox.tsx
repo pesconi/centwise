@@ -1,10 +1,12 @@
 "use client";
 
 import { importPostingBlockers } from "@centwise/core";
+import type { ImportDuplicateMatch } from "@centwise/core";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FormEvent, useState } from "react";
 
 import { BankStatementUpload } from "@/components/bank-statement-upload";
+import { ImportDuplicateReview } from "@/components/import-duplicate-review";
 
 interface ImportSource {
   sourceType: string;
@@ -15,6 +17,7 @@ interface ImportSource {
 }
 
 interface ImportCandidate {
+  duplicateReview: ImportDuplicateMatch[];
   id: string;
   accountId: string | null;
   amountInCents: number | null;
@@ -339,6 +342,7 @@ export function ImportInbox() {
 
                 return (
                   <article
+                    id={`import-${candidate.id}`}
                     className="bg-white p-5 shadow-[0_20px_50px_-32px_rgba(23,33,29,0.45)] sm:p-7"
                     key={candidate.id}
                   >
@@ -378,6 +382,8 @@ export function ImportInbox() {
                         )}
                       </dl>
                     ) : null}
+
+                    <ImportDuplicateReview matches={candidate.duplicateReview} />
 
                     {isEditable ? (
                       <form
