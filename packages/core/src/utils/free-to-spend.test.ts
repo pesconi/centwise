@@ -189,4 +189,49 @@ describe("calculateFreeToSpend", () => {
         expect(result.daysRemainingInMonth).toBe(31);
         expect(result.dailySafeSpendCents).toBe(322);
     });
+
+    it("reserves only an occurrence's unpaid remainder, clamping overpayments at zero", () => {
+        const result = calculateFreeToSpend(createInput({
+            transactions: [
+                { accountId: "account-1", amountInCents: 400, type: "expense", occurredAt: new Date("2026-11-03T08:00:00Z") },
+                { accountId: "account-1", amountInCents: 1_300, type: "expense", occurredAt: new Date("2026-11-03T09:00:00Z") }
+            ],
+            recurringOccurrences: [
+                { type: "bill", amountInCents: 1_000, settledAmountInCents: 400, scheduledDate: "2026-11-03", isCancelled: false, isShortSettled: false },
+                { type: "bill", amountInCents: 1_000, settledAmountInCents: 1_300, scheduledDate: "2026-11-03", isCancelled: false, isShortSettled: false }
+            ]
+        }));
+
+        expect(result.liquidBalanceCents).toBe(98_300);
+        expect(result.remainingBillsCents).toBe(600);
+        expect(result.freeToSpendCents).toBe(97_700);
+    });
+
+    it("stops reserving a bill after explicit short settlement", () => {
+        const result = calculateFreeToSpend(createInput({
+            transactions: [
+                { accountId: "account-1", amountInCents: 400, type: "expense", occurredAt: new Date("2026-11-03T08:00:00Z") }
+            ],
+            recurringOccurrences: [
+                { type: "bill", amountInCents: 1_000, settledAmountInCents: 400, scheduledDate: "2026-11-03", isCancelled: false, isShortSettled: true }
+            ]
+        }));
+
+        expect(result.liquidBalanceCents).toBe(99_600);
+        expect(result.remainingBillsCents).toBe(0);
+    });
+
+    it("carries overdue bills across month boundaries but excludes overdue unreceived income", () => {
+        const result = calculateFreeToSpend(createInput({
+            asOf: new Date("2026-12-01T12:00:00Z"),
+            recurringOccurrences: [
+                { type: "bill", amountInCents: 7_000, settledAmountInCents: 2_000, scheduledDate: "2026-11-20", isCancelled: false, isShortSettled: false },
+                { type: "income", amountInCents: 20_000, settledAmountInCents: 0, scheduledDate: "2026-11-20", isCancelled: false, isShortSettled: false },
+                { type: "income", amountInCents: 30_000, settledAmountInCents: 5_000, scheduledDate: "2026-12-05", isCancelled: false, isShortSettled: false }
+            ]
+        }));
+
+        expect(result.remainingBillsCents).toBe(5_000);
+        expect(result.remainingIncomeCents).toBe(25_000);
+    });
 });

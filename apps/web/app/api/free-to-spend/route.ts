@@ -1,18 +1,17 @@
-import { calculateFreeToSpend, defaultFinancialSettings } from "@centwise/core";
-import { db } from "@centwise/database";
+import {
+    calculateFreeToSpend,
+    defaultFinancialSettings,
+    getRecurringOccurrenceDate,
+    getUtcDateString,
+    getUtcMonthStartDate,
+    isHistoricalTransaction
+} from "@centwise/core";
+import { db, schema } from "@centwise/database";
 import { NextResponse } from "next/server";
 
 import { getSessionUserId } from "@/server/auth";
 
 export const dynamic = "force-dynamic";
-
-function getOccurrenceDate(asOf: Date, dayOfMonth: number, lastDayOfMonth: number): string {
-    const year = asOf.getUTCFullYear();
-    const month = String(asOf.getUTCMonth() + 1).padStart(2, "0");
-    const day = String(Math.min(dayOfMonth, lastDayOfMonth)).padStart(2, "0");
-
-    return `${year}-${month}-${day}`;
-}
 
 export async function GET(): Promise<NextResponse> {
     const userId = await getSessionUserId();
@@ -38,42 +37,124 @@ export async function GET(): Promise<NextResponse> {
             where: (financialSettings, { eq }) => eq(financialSettings.userId, userId)
         })
     ]);
+    const now = new Date();
+    const today = getUtcDateString(now);
+    const occurrenceMonth = getUtcMonthStartDate(now);
+    await Promise.all([
+        ...recurringIncomes
+            .filter((income) => income.isActive)
+            .map((income) => {
+                const scheduledDate = getRecurringOccurrenceDate(
+                    now.getUTCFullYear(),
+                    now.getUTCMonth(),
+                    income.expectedDayOfMonth
+                );
+
+                return scheduledDate < today
+                    ? Promise.resolve()
+                    : db.insert(schema.recurringOccurrences).values({
+                        userId,
+                        recurringIncomeId: income.id,
+                        type: "income",
+                        name: income.name,
+                        amountInCents: income.amountInCents,
+                        occurrenceMonth,
+                        scheduledDate
+                    }).onConflictDoNothing();
+            }),
+        ...recurringBills
+            .filter((bill) => bill.isActive)
+            .map((bill) => {
+                const scheduledDate = getRecurringOccurrenceDate(
+                    now.getUTCFullYear(),
+                    now.getUTCMonth(),
+                    bill.dueDayOfMonth
+                );
+
+                return scheduledDate < today
+                    ? Promise.resolve()
+                    : db.insert(schema.recurringOccurrences).values({
+                        userId,
+                        recurringBillId: bill.id,
+                        type: "bill",
+                        name: bill.name,
+                        amountInCents: bill.amountInCents,
+                        occurrenceMonth,
+                        scheduledDate
+                    }).onConflictDoNothing();
+            })
+    ]);
+    const recurringOccurrences = await db.query.recurringOccurrences.findMany({
+        where: (occurrences, { eq }) => eq(occurrences.userId, userId),
+        orderBy: (occurrences, { asc }) => [asc(occurrences.scheduledDate)]
+    });
+    const settledByOccurrence = new Map<string, number>();
+    const accountsById = new Map(accounts.map((account) => [account.id, account]));
+
+    for (const transaction of transactions) {
+        const account = accountsById.get(transaction.accountId);
+
+        if (transaction.recurringOccurrenceId && account
+            && transaction.occurredAt <= now
+            && !isHistoricalTransaction(transaction.occurredAt, account.openingBalanceDate)) {
+            settledByOccurrence.set(
+                transaction.recurringOccurrenceId,
+                (settledByOccurrence.get(transaction.recurringOccurrenceId) ?? 0) + transaction.amountInCents
+            );
+        }
+    }
+
     const financialSettings = settings ?? defaultFinancialSettings;
-    const asOf = new Date();
+    const asOf = now;
     const calculation = calculateFreeToSpend({
         asOf,
         accounts,
         transactions,
-        recurringIncomes,
-        recurringBills,
+        recurringIncomes: [],
+        recurringBills: [],
+        recurringOccurrences: recurringOccurrences.map((occurrence) => ({
+            type: occurrence.type,
+            amountInCents: occurrence.amountInCents,
+            settledAmountInCents: settledByOccurrence.get(occurrence.id) ?? 0,
+            scheduledDate: occurrence.rescheduledDate ?? occurrence.scheduledDate,
+            isCancelled: occurrence.isCancelled,
+            isShortSettled: occurrence.shortSettledAt !== null
+        })),
         monthlyInvestmentCents: financialSettings.monthlyInvestmentCents,
         safetyReserveCents: financialSettings.safetyReserveCents
     });
     const lastDayOfMonth = new Date(Date.UTC(asOf.getUTCFullYear(), asOf.getUTCMonth() + 1, 0)).getUTCDate();
-    const currentDay = asOf.getUTCDate();
-    const scheduledItems = [
-        ...recurringIncomes
-            .filter((income) => income.isActive && Math.min(income.expectedDayOfMonth, lastDayOfMonth) > currentDay)
-            .map((income) => ({
-                id: income.id,
-                name: income.name,
-                type: "income" as const,
-                amountInCents: income.amountInCents,
-                dayOfMonth: income.expectedDayOfMonth,
-                date: getOccurrenceDate(asOf, income.expectedDayOfMonth, lastDayOfMonth)
-            })),
-        ...recurringBills
-            .filter((bill) => bill.isActive && Math.min(bill.dueDayOfMonth, lastDayOfMonth) >= currentDay)
-            .map((bill) => ({
-                id: bill.id,
-                name: bill.name,
-                type: "bill" as const,
-                amountInCents: bill.amountInCents,
-                dayOfMonth: bill.dueDayOfMonth,
-                date: getOccurrenceDate(asOf, bill.dueDayOfMonth, lastDayOfMonth)
-            }))
-    ].sort((first, second) => first.date.localeCompare(second.date));
-    const periodEndDate = getOccurrenceDate(asOf, lastDayOfMonth, lastDayOfMonth);
+    const scheduledItems = recurringOccurrences
+        .map((occurrence) => {
+            const settledAmountInCents = settledByOccurrence.get(occurrence.id) ?? 0;
+            const outstandingAmountInCents = occurrence.isCancelled || occurrence.shortSettledAt
+                ? 0
+                : Math.max(occurrence.amountInCents - settledAmountInCents, 0);
+
+            return {
+                id: occurrence.id,
+                ruleId: occurrence.recurringBillId ?? occurrence.recurringIncomeId,
+                name: occurrence.name,
+                type: occurrence.type,
+                amountInCents: occurrence.amountInCents,
+                settledAmountInCents,
+                outstandingAmountInCents,
+                date: occurrence.rescheduledDate ?? occurrence.scheduledDate,
+                isOverdue: (occurrence.rescheduledDate ?? occurrence.scheduledDate) < today,
+                ruleName: occurrence.type === "bill"
+                    ? recurringBills.find((bill) => bill.id === occurrence.recurringBillId)?.name ?? occurrence.name
+                    : recurringIncomes.find((income) => income.id === occurrence.recurringIncomeId)?.name ?? occurrence.name,
+                ruleAmountInCents: occurrence.type === "bill"
+                    ? recurringBills.find((bill) => bill.id === occurrence.recurringBillId)?.amountInCents ?? occurrence.amountInCents
+                    : recurringIncomes.find((income) => income.id === occurrence.recurringIncomeId)?.amountInCents ?? occurrence.amountInCents,
+                ruleDayOfMonth: occurrence.type === "bill"
+                    ? recurringBills.find((bill) => bill.id === occurrence.recurringBillId)?.dueDayOfMonth ?? Number(occurrence.scheduledDate.slice(-2))
+                    : recurringIncomes.find((income) => income.id === occurrence.recurringIncomeId)?.expectedDayOfMonth ?? Number(occurrence.scheduledDate.slice(-2))
+            };
+        })
+        .filter((occurrence) => occurrence.outstandingAmountInCents > 0)
+        .sort((first, second) => first.date.localeCompare(second.date));
+    const periodEndDate = getRecurringOccurrenceDate(asOf.getUTCFullYear(), asOf.getUTCMonth(), lastDayOfMonth);
 
     return NextResponse.json({ calculation, periodEndDate, scheduledItems });
 }

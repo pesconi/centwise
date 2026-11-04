@@ -24,12 +24,22 @@ export interface FreeToSpendRecurringBill {
     isActive: boolean;
 }
 
+export interface FreeToSpendRecurringOccurrence {
+    type: "income" | "bill";
+    amountInCents: number;
+    settledAmountInCents: number;
+    scheduledDate: string;
+    isCancelled: boolean;
+    isShortSettled: boolean;
+}
+
 export interface FreeToSpendInput {
     asOf: Date;
     accounts: FreeToSpendAccount[];
     transactions: FreeToSpendTransaction[];
     recurringIncomes: FreeToSpendRecurringIncome[];
     recurringBills: FreeToSpendRecurringBill[];
+    recurringOccurrences?: FreeToSpendRecurringOccurrence[];
     monthlyInvestmentCents: number;
     safetyReserveCents: number;
 }
@@ -76,12 +86,26 @@ export function calculateFreeToSpend(input: FreeToSpendInput): FreeToSpendResult
                 (total, transaction) => total + (transaction.type === "income" ? transaction.amountInCents : -transaction.amountInCents),
                 0
             );
-    const remainingIncomeCents = input.recurringIncomes
-        .filter((income) => income.isActive && occursAfterToday(income.expectedDayOfMonth, input.asOf))
-        .reduce((total, income) => total + income.amountInCents, 0);
-    const remainingBillsCents = input.recurringBills
-        .filter((bill) => bill.isActive && isDueTodayOrLater(bill.dueDayOfMonth, input.asOf))
-        .reduce((total, bill) => total + bill.amountInCents, 0);
+    const today = input.asOf.toISOString().slice(0, 10);
+    const remainingIncomeCents = input.recurringOccurrences
+        ? input.recurringOccurrences
+            .filter((occurrence) => occurrence.type === "income"
+                && !occurrence.isCancelled
+                && !occurrence.isShortSettled
+                && occurrence.scheduledDate > today)
+            .reduce((total, occurrence) => total + Math.max(occurrence.amountInCents - occurrence.settledAmountInCents, 0), 0)
+        : input.recurringIncomes
+            .filter((income) => income.isActive && occursAfterToday(income.expectedDayOfMonth, input.asOf))
+            .reduce((total, income) => total + income.amountInCents, 0);
+    const remainingBillsCents = input.recurringOccurrences
+        ? input.recurringOccurrences
+            .filter((occurrence) => occurrence.type === "bill"
+                && !occurrence.isCancelled
+                && !occurrence.isShortSettled)
+            .reduce((total, occurrence) => total + Math.max(occurrence.amountInCents - occurrence.settledAmountInCents, 0), 0)
+        : input.recurringBills
+            .filter((bill) => bill.isActive && isDueTodayOrLater(bill.dueDayOfMonth, input.asOf))
+            .reduce((total, bill) => total + bill.amountInCents, 0);
     const freeToSpendCents = liquidBalanceCents
         + remainingIncomeCents
         - remainingBillsCents

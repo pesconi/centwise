@@ -12,6 +12,7 @@ interface CurrentUser {
 interface Transaction {
     id: string;
     accountId: string;
+    recurringOccurrenceId: string | null;
     amountInCents: number;
     currency: string;
     type: "income" | "expense";
@@ -41,11 +42,17 @@ interface FreeToSpendResult {
 
 interface ScheduledItem {
     id: string;
+    ruleId: string | null;
     name: string;
     type: "income" | "bill";
     amountInCents: number;
-    dayOfMonth: number;
+    settledAmountInCents: number;
+    outstandingAmountInCents: number;
+    isOverdue: boolean;
     date: string;
+    ruleName: string;
+    ruleAmountInCents: number;
+    ruleDayOfMonth: number;
 }
 
 interface PlanEntryDraft {
@@ -90,9 +97,13 @@ export function FinanceDashboard() {
     const [billDrafts, setBillDrafts] = useState<PlanEntryDraft[]>([]);
     const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
     const [editingTransactionId, setEditingTransactionId] = useState<string | null>(null);
-    const [editingScheduledItem, setEditingScheduledItem] = useState<{ id: string; type: ScheduledItem["type"] } | null>(null);
+    const [editingScheduledItem, setEditingScheduledItem] = useState<{
+        occurrenceId: string;
+        type: ScheduledItem["type"];
+    } | null>(null);
     const [transactionEditError, setTransactionEditError] = useState<string | null>(null);
     const [scheduledItemEditError, setScheduledItemEditError] = useState<string | null>(null);
+    const [settlementError, setSettlementError] = useState<string | null>(null);
 
     const sessionQuery = useQuery({
         queryKey: ["session"],
@@ -222,7 +233,7 @@ export function FinanceDashboard() {
     });
 
     const transactionMutation = useMutation({
-        mutationFn: (transaction: Omit<Transaction, "id">) =>
+        mutationFn: (transaction: Omit<Transaction, "id" | "recurringOccurrenceId"> & { recurringOccurrenceId?: string | null }) =>
             requestJson<{ transaction: Transaction }>("/api/transactions", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -237,7 +248,7 @@ export function FinanceDashboard() {
     const updateTransactionMutation = useMutation({
         mutationFn: ({ transactionId, updates }: {
             transactionId: string;
-            updates: Pick<Transaction, "amountInCents" | "type" | "occurredAt" | "description">;
+            updates: Pick<Transaction, "accountId" | "amountInCents" | "type" | "occurredAt" | "description" | "recurringOccurrenceId">;
         }) => requestJson<{ transaction: Transaction }>(`/api/transactions?transactionId=${transactionId}`, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
@@ -260,7 +271,7 @@ export function FinanceDashboard() {
             amountInCents: number;
             dayOfMonth: number;
         }) => requestJson<{ bill?: unknown; income?: unknown }>(
-            `/api/recurring-${item.type === "bill" ? "bills" : "incomes"}/${item.id}`,
+            `/api/recurring-${item.type === "bill" ? "bills" : "incomes"}/${item.ruleId}`,
             {
                 method: "PUT",
                 headers: { "Content-Type": "application/json" },
@@ -284,6 +295,26 @@ export function FinanceDashboard() {
         onSuccess: async () => {
             await queryClient.invalidateQueries({ queryKey: ["transactions"] });
             await queryClient.invalidateQueries({ queryKey: ["free-to-spend"] });
+        }
+    });
+
+    const occurrenceActionMutation = useMutation({
+        mutationFn: ({ occurrenceId, action }: {
+            occurrenceId: string;
+            action:
+                | { action: "short-settle"; confirm: true }
+                | { action: "cancel" }
+                | { action: "reschedule"; scheduledDate: string };
+        }) => requestJson<{ occurrence: unknown }>(`/api/recurring-occurrences/${occurrenceId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(action)
+        }),
+        onSuccess: async () => {
+            await Promise.all([
+                queryClient.invalidateQueries({ queryKey: ["transactions"] }),
+                queryClient.invalidateQueries({ queryKey: ["free-to-spend"] })
+            ]);
         }
     });
 
@@ -355,14 +386,85 @@ export function FinanceDashboard() {
             return;
         }
 
+        const accountId = String(formData.get("accountId"));
+
+        if (!accountId) {
+            setTransactionEditError("Choose an account.");
+            return;
+        }
+
         updateTransactionMutation.mutate({
             transactionId,
             updates: {
+                accountId,
                 amountInCents,
                 type,
                 occurredAt: occurredAt.toISOString(),
-                description: String(formData.get("description")).trim() || null
+                description: String(formData.get("description")).trim() || null,
+                recurringOccurrenceId: String(formData.get("recurringOccurrenceId")) || null
             }
+        });
+    }
+
+    function handleOccurrencePaymentSubmit(event: FormEvent<HTMLFormElement>, item: ScheduledItem) {
+        event.preventDefault();
+        transactionMutation.reset();
+
+        const formData = new FormData(event.currentTarget);
+        const amountInCents = Math.round(Number(formData.get("amount")) * 100);
+        const occurredDate = String(formData.get("occurredAt"));
+        const accountId = String(formData.get("accountId"));
+        const occurredAt = new Date(`${occurredDate}T00:00:00.000Z`);
+
+        if (!Number.isSafeInteger(amountInCents) || amountInCents <= 0
+            || !occurredDate || Number.isNaN(occurredAt.getTime())
+            || !accountId) {
+            setSettlementError("Enter a positive amount, valid date, and account.");
+            return;
+        }
+
+        setSettlementError(null);
+        transactionMutation.mutate({
+            accountId,
+            recurringOccurrenceId: item.id,
+            amountInCents,
+            currency: "EUR",
+            type: item.type === "income" ? "income" : "expense",
+            occurredAt: occurredAt.toISOString(),
+            description: item.name
+        });
+    }
+
+    function handleShortSettle(item: ScheduledItem) {
+        if (window.confirm(`Accept ${formatCurrency(item.settledAmountInCents, "EUR")} as full settlement for ${item.name}?`)) {
+            setSettlementError(null);
+            occurrenceActionMutation.mutate({
+                occurrenceId: item.id,
+                action: { action: "short-settle", confirm: true }
+            });
+        }
+    }
+
+    function handleOccurrenceCancel(item: ScheduledItem) {
+        if (window.confirm(`Cancel the remaining ${formatCurrency(item.outstandingAmountInCents, "EUR")} for ${item.name}?`)) {
+            setSettlementError(null);
+            occurrenceActionMutation.mutate({ occurrenceId: item.id, action: { action: "cancel" } });
+        }
+    }
+
+    function handleOccurrenceRescheduleSubmit(event: FormEvent<HTMLFormElement>, item: ScheduledItem) {
+        event.preventDefault();
+        const scheduledDate = String(new FormData(event.currentTarget).get("scheduledDate"));
+
+        if (!scheduledDate || scheduledDate <= new Date().toISOString().slice(0, 10)) {
+            setSettlementError("Choose a future UTC date to reschedule this income.");
+            return;
+        }
+
+        setSettlementError(null);
+        occurrenceActionMutation.mutate({
+            occurrenceId: item.id,
+            action: { action: "reschedule", scheduledDate }
         });
     }
 
@@ -370,6 +472,11 @@ export function FinanceDashboard() {
         event.preventDefault();
         setScheduledItemEditError(null);
         updateScheduledItemMutation.reset();
+
+        if (!item.ruleId) {
+            setScheduledItemEditError("This occurrence no longer has a recurring rule.");
+            return;
+        }
 
         const formData = new FormData(event.currentTarget);
         const name = String(formData.get("name")).trim();
@@ -383,6 +490,17 @@ export function FinanceDashboard() {
         }
 
         updateScheduledItemMutation.mutate({ item, name, amountInCents, dayOfMonth });
+    }
+
+    function handleScheduledRuleEdit(item: ScheduledItem) {
+        if (!item.ruleId) {
+            setScheduledItemEditError("This occurrence no longer has a recurring rule.");
+            return;
+        }
+
+        setEditingScheduledItem({ occurrenceId: item.id, type: item.type });
+        setScheduledItemEditError(null);
+        updateScheduledItemMutation.reset();
     }
 
     function handleAccountSubmit(event: FormEvent<HTMLFormElement>) {
@@ -776,13 +894,13 @@ export function FinanceDashboard() {
                                 </div>
                                 <div>
                                     <div className="flex items-baseline justify-between gap-4">
-                                        <h3 className="text-xl font-semibold">Coming up</h3>
-                                        <span className="text-sm text-ink/55">Remaining income and bills</span>
+                                        <h3 className="text-xl font-semibold">Open occurrences</h3>
+                                        <span className="text-sm text-ink/55">Payments and receipts are linked explicitly</span>
                                     </div>
                                     {freeToSpendQuery.isLoading ? <p className="mt-4 text-sm text-ink/60">Loading your monthly plan...</p> : null}
                                     {freeToSpendQuery.isError ? <p className="mt-4 text-sm text-red-700">{freeToSpendQuery.error.message}</p> : null}
                                     {!freeToSpendQuery.isLoading && !freeToSpendQuery.isError && scheduledItems.length === 0 ? (
-                                        <p className="mt-4 text-sm text-ink/60">No more scheduled income or bills this month.</p>
+                                        <p className="mt-4 text-sm text-ink/60">No open recurring occurrences.</p>
                                     ) : null}
                                     {scheduledItems.length > 0 ? (
                                         <ul className="mt-3 divide-y divide-ink/10">
@@ -791,35 +909,73 @@ export function FinanceDashboard() {
                                                     <div className="flex items-center justify-between gap-4">
                                                         <div className="min-w-0">
                                                             <p className="truncate font-medium">{item.name}</p>
-                                                            <p className="text-sm text-ink/55">{item.type === "income" ? "Income" : "Bill"} - {formatPlanDate(item.date)}</p>
+                                                            <p className="text-sm text-ink/55">
+                                                                {item.type === "income" ? "Income" : "Bill"} - {formatPlanDate(item.date)}
+                                                                {item.isOverdue ? " - overdue" : ""}
+                                                            </p>
+                                                            <p className="text-xs text-ink/55">
+                                                                Recorded {formatCurrency(item.settledAmountInCents, "EUR")}; remaining {formatCurrency(item.outstandingAmountInCents, "EUR")}
+                                                            </p>
                                                         </div>
                                                         <div className="flex shrink-0 items-center gap-3">
                                                             <p className={`font-semibold ${item.type === "income" ? "text-spruce" : "text-ink"}`}>
-                                                                {item.type === "income" ? "+" : "-"}{formatCurrency(item.amountInCents, "EUR")}
+                                                                {item.type === "income" ? "+" : "-"}{formatCurrency(item.outstandingAmountInCents, "EUR")}
                                                             </p>
-                                                            <button
+                                                            {item.ruleId ? <button
                                                                 className="text-sm font-semibold text-spruce underline underline-offset-4"
-                                                                onClick={() => {
-                                                                    setEditingScheduledItem({ id: item.id, type: item.type });
-                                                                    setScheduledItemEditError(null);
-                                                                    updateScheduledItemMutation.reset();
-                                                                }}
+                                                                onClick={() => handleScheduledRuleEdit(item)}
                                                                 type="button"
                                                             >
-                                                                Edit
-                                                            </button>
+                                                                Edit rule
+                                                            </button> : null}
                                                         </div>
                                                     </div>
-                                                    {editingScheduledItem?.id === item.id && editingScheduledItem.type === item.type ? (
+                                                    <form className="mt-3 grid gap-3 border-l-2 border-spruce/30 pl-4 sm:grid-cols-4" onSubmit={(event) => handleOccurrencePaymentSubmit(event, item)}>
+                                                        <label className="grid gap-1 text-sm font-semibold">Amount (EUR)
+                                                            <input className="h-10 border border-ink/20 bg-white px-3 outline-none ring-spruce focus:ring-2" defaultValue={(item.outstandingAmountInCents / 100).toFixed(2)} min="0.01" name="amount" required step="0.01" type="number" />
+                                                        </label>
+                                                        <label className="grid gap-1 text-sm font-semibold">Date
+                                                            <input className="h-10 border border-ink/20 bg-white px-3 outline-none ring-spruce focus:ring-2" defaultValue={new Date().toISOString().slice(0, 10)} name="occurredAt" required type="date" />
+                                                        </label>
+                                                        <label className="grid gap-1 text-sm font-semibold">Account
+                                                            <select className="h-10 border border-ink/20 bg-white px-3 outline-none ring-spruce focus:ring-2" defaultValue={accounts[0]?.id ?? ""} name="accountId" required>
+                                                                {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
+                                                            </select>
+                                                        </label>
+                                                        <button className="h-10 self-end bg-spruce px-4 text-sm font-semibold text-white disabled:opacity-60" disabled={transactionMutation.isPending || accounts.length === 0} type="submit">
+                                                            {transactionMutation.isPending ? "Saving..." : item.type === "income" ? "Record receipt" : "Record payment"}
+                                                        </button>
+                                                    </form>
+                                                    {transactionMutation.isError ? <p className="mt-2 text-sm text-red-700">{transactionMutation.error.message}</p> : null}
+                                                    {settlementError ? <p className="mt-2 text-sm text-red-700">{settlementError}</p> : null}
+                                                    <div className="mt-3 flex flex-wrap items-center gap-4">
+                                                        {item.settledAmountInCents > 0 && item.outstandingAmountInCents > 0 ? (
+                                                            <button className="text-sm font-semibold text-spruce underline underline-offset-4" onClick={() => handleShortSettle(item)} type="button">
+                                                                Accept partial amount as settled
+                                                            </button>
+                                                        ) : null}
+                                                        {item.type === "income" ? (
+                                                            <form className="flex flex-wrap items-end gap-2" onSubmit={(event) => handleOccurrenceRescheduleSubmit(event, item)}>
+                                                                <label className="grid gap-1 text-xs font-semibold">Reschedule to
+                                                                    <input className="h-9 border border-ink/20 bg-white px-2 text-sm outline-none ring-spruce focus:ring-2" defaultValue={new Date(Date.now() + 86_400_000).toISOString().slice(0, 10)} min={new Date(Date.now() + 86_400_000).toISOString().slice(0, 10)} name="scheduledDate" required type="date" />
+                                                                </label>
+                                                                <button className="h-9 px-2 text-sm font-semibold text-spruce underline underline-offset-4" disabled={occurrenceActionMutation.isPending} type="submit">Reschedule income</button>
+                                                            </form>
+                                                        ) : null}
+                                                        <button className="text-sm font-semibold text-red-700 underline underline-offset-4" disabled={occurrenceActionMutation.isPending} onClick={() => handleOccurrenceCancel(item)} type="button">Cancel occurrence</button>
+                                                    </div>
+                                                    {occurrenceActionMutation.isError ? <p className="mt-2 text-sm text-red-700">{occurrenceActionMutation.error.message}</p> : null}
+                                                    {editingScheduledItem?.occurrenceId === item.id && editingScheduledItem.type === item.type ? (
                                                         <form className="mt-4 grid gap-3 border-l-2 border-spruce/30 pl-4 sm:grid-cols-3" onSubmit={(event) => handleScheduledItemEditSubmit(event, item)}>
+                                                            <p className="text-sm text-ink/60 sm:col-span-3">Changes apply to future occurrences; this occurrence keeps its original amount and date.</p>
                                                             <label className="grid gap-1 text-sm font-semibold">Name
-                                                                <input className="h-10 border border-ink/20 bg-white px-3 outline-none ring-spruce focus:ring-2" defaultValue={item.name} maxLength={100} name="name" required />
+                                                                <input className="h-10 border border-ink/20 bg-white px-3 outline-none ring-spruce focus:ring-2" defaultValue={item.ruleName} maxLength={100} name="name" required />
                                                             </label>
                                                             <label className="grid gap-1 text-sm font-semibold">Amount (EUR)
-                                                                <input className="h-10 border border-ink/20 bg-white px-3 outline-none ring-spruce focus:ring-2" defaultValue={(item.amountInCents / 100).toFixed(2)} min="0.01" name="amount" required step="0.01" type="number" />
+                                                                <input className="h-10 border border-ink/20 bg-white px-3 outline-none ring-spruce focus:ring-2" defaultValue={(item.ruleAmountInCents / 100).toFixed(2)} min="0.01" name="amount" required step="0.01" type="number" />
                                                             </label>
                                                             <label className="grid gap-1 text-sm font-semibold">{item.type === "bill" ? "Due day" : "Expected day"}
-                                                                <input className="h-10 border border-ink/20 bg-white px-3 outline-none ring-spruce focus:ring-2" defaultValue={item.dayOfMonth} max="31" min="1" name="dayOfMonth" required type="number" />
+                                                                <input className="h-10 border border-ink/20 bg-white px-3 outline-none ring-spruce focus:ring-2" defaultValue={item.ruleDayOfMonth} max="31" min="1" name="dayOfMonth" required type="number" />
                                                             </label>
                                                             <div className="flex items-center gap-4 sm:col-span-3">
                                                                 <button className="h-10 bg-spruce px-4 text-sm font-semibold text-white disabled:opacity-60" disabled={updateScheduledItemMutation.isPending} type="submit">
@@ -883,6 +1039,11 @@ export function FinanceDashboard() {
                                             </div>
                                             {editingTransactionId === transaction.id ? (
                                                 <form className="mt-4 grid gap-3 border-l-2 border-spruce/30 pl-4 sm:grid-cols-2" onSubmit={(event) => handleTransactionEditSubmit(event, transaction.id)}>
+                                                    <label className="grid gap-1 text-sm font-semibold">Account
+                                                        <select className="h-10 border border-ink/20 bg-white px-3 outline-none ring-spruce focus:ring-2" defaultValue={transaction.accountId} name="accountId" required>
+                                                            {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
+                                                        </select>
+                                                    </label>
                                                     <label className="grid gap-1 text-sm font-semibold">Description
                                                         <input className="h-10 border border-ink/20 bg-white px-3 outline-none ring-spruce focus:ring-2" defaultValue={transaction.description ?? ""} maxLength={500} name="description" />
                                                     </label>
@@ -897,6 +1058,20 @@ export function FinanceDashboard() {
                                                     </label>
                                                     <label className="grid gap-1 text-sm font-semibold">Date
                                                         <input className="h-10 border border-ink/20 bg-white px-3 outline-none ring-spruce focus:ring-2" defaultValue={transaction.occurredAt.slice(0, 10)} name="occurredAt" required type="date" />
+                                                    </label>
+                                                    <label className="grid gap-1 text-sm font-semibold sm:col-span-2">Recurring occurrence
+                                                        <select className="h-10 border border-ink/20 bg-white px-3 outline-none ring-spruce focus:ring-2" defaultValue={transaction.recurringOccurrenceId ?? ""} name="recurringOccurrenceId">
+                                                            <option value="">No recurring occurrence</option>
+                                                            {transaction.recurringOccurrenceId && !scheduledItems.some((item) => item.id === transaction.recurringOccurrenceId) ? (
+                                                                <option value={transaction.recurringOccurrenceId}>Keep current occurrence</option>
+                                                            ) : null}
+                                                            {scheduledItems.map((item) => (
+                                                                <option key={item.id} value={item.id}>
+                                                                    {item.type === "income" ? "Income" : "Bill"}: {item.name} - {formatPlanDate(item.date)}
+                                                                </option>
+                                                            ))}
+                                                        </select>
+                                                        <span className="font-normal text-ink/55">Changes to account, direction, or month require a matching occurrence or explicit unlinking.</span>
                                                     </label>
                                                     <div className="flex items-center gap-4 sm:col-span-2">
                                                         <button className="h-10 bg-spruce px-4 text-sm font-semibold text-white disabled:opacity-60" disabled={updateTransactionMutation.isPending} type="submit">

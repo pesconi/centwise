@@ -6,6 +6,7 @@ export const transactionSchema = z.object({
     currency: z.literal("EUR"),
     type: z.enum(["income", "expense"]),
     occurredAt: z.coerce.date(),
+    recurringOccurrenceId: z.string().uuid().nullable().optional(),
     description: z.string().trim().max(500).nullable().optional()
 });
 

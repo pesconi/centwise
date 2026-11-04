@@ -21,4 +21,9 @@ describe("transactionUpdateSchema", () => {
             expect(result.data.occurredAt).toEqual(new Date("2026-11-04T00:00:00.000Z"));
         }
     });
+
+    it("accepts explicit occurrence reconciliation or unlinking", () => {
+        expect(transactionUpdateSchema.safeParse({ recurringOccurrenceId: "2ce4a8cc-1b85-4be9-836b-efc7db1c1fa7" }).success).toBe(true);
+        expect(transactionUpdateSchema.safeParse({ recurringOccurrenceId: null }).success).toBe(true);
+    });
 });

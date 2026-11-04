@@ -85,12 +85,36 @@ duplicate linking, failed extraction records, and approval/posting are not imple
 - Unpaid expenses remain reserved after the due date and across months until settled/cancelled.
   Overdue unreceived income is not added to spendable cash unless received or rescheduled.
 
-The user chose **only balance dates and historical cash exclusion** for this session. Settlement links,
-monthly occurrence persistence and overdue carry-forward remain pending; the current recurring forecast
-calculation has not changed. The API and database continue to block ALL candidate posting, even for
-historical, apparently unique or fully reviewed candidates. Cross-source/manual collisions cannot yet be
-resolved; never merge or approve them based only on equal value/date. Card and suspicious internal-transfer
-posting remain blocked. No development data was wiped.
+### Implemented monthly occurrence and settlement slice
+
+- `recurring_occurrences` stores a monthly snapshot for each recurring rule, with an explicit linked
+  transaction relation. Database uniqueness makes current-month materialization idempotent under
+  concurrent plan requests; day 29–31 is clamped to the last calendar day.
+- The initial cutover is the current UTC date. The authenticated free-to-spend request materializes only
+  current-month occurrences scheduled today or later; it does not infer previous obligations or
+  transactions. Following months are materialized when that month's plan is requested. Existing rows
+  survive recurring-rule edits and deactivation.
+- Settlements are explicit occurrence links, never inferred from matching amount/date. Partial payments
+  reduce only the remaining amount; overpayments affect actual cash once and outstanding amounts clamp
+  to zero. A smaller-than-expected settlement requires an explicit action. Editing a linked transaction
+  recalculates atomically; deletion reopens the balance. Account, direction and month changes require
+  explicit reconciliation. Cross-month rescheduling is rejected while linked transactions remain.
+- Open bills stay reserved when overdue and across months. Unreceived income due today or earlier does
+  not increase spendable funds unless received or explicitly rescheduled. Historical pre-opening-date
+  transactions and future-dated movements do not change current cash or settle occurrences.
+- The dashboard allows explicit payments/receipts, short settlement, cancellation, rescheduling and
+  future-rule edits. Rule edits do not rewrite existing occurrences. Import approval remains blocked in
+  the API and database. Cross-source/manual duplicate reconciliation, card posting and suspicious
+  internal-transfer posting are still not implemented.
+- At the user's request, only the 5 existing local development transaction rows were deleted; accounts,
+  rules, settings and inbox records were preserved. The database target was verified as
+  `localhost:5433/centwise`; synthetic integration transactions were cleaned afterward.
+
+The occurrence layer is materialized lazily by the free-to-spend API; no background job exists. Visual
+validation of the dashboard is pending user manual review after two browser-action timeouts. Do not
+commit until the user confirms that review. Posting must remain blocked until cross-source ambiguity
+handling and atomic/concurrent approval are implemented and verified. Never deduplicate or resolve a
+collision solely by amount/date.
 
 ## 2. Android capture
 
@@ -157,8 +181,8 @@ or explicit review/failure states, never silent financial postings.
 
 ## Delivery order and validation
 
-1. Apply the approved balance-date and settlement policy. The balance-date slice is implemented; next add
-   persisted occurrences and explicit settlement, then cross-source reconciliation and atomic posting.
+1. The approved balance-date and occurrence/settlement slices are implemented. Next add cross-source and
+   manual-transaction duplicate review/reconciliation, then separately verify atomic and concurrent posting.
 2. Mobile authentication and one known bank's SMS format, then notification capture and offline sync.
 3. PDF upload, local extraction/OCR/AI, and inbox preview; card posting remains gated.
 4. Recurrence suggestions and only then opt-in automation.
@@ -180,11 +204,29 @@ Apply generated migrations to local PostgreSQL before committing schema changes.
 - Server RAM/CPU/GPU for local OCR/model selection and extraction throughput.
 - Explicit upload limits and retention periods.
 
-Recommended next session: implement a bounded persisted-occurrence/settlement slice under the approved
-policies, preserving the posting block until reconciliation and atomic approval are fully verified.
+Recommended next session: visually validate the occurrence settlement UI, then continue the bank
+statement slice with authenticated file-read tracking and safe, non-persisted PDF processing in preview
+mode. The user expressed a preference for the OpenAI API, which conflicts with the current local-model
+privacy constraint; resolve that boundary before transmitting statement content. Do not process real
+documents during development or make PDF resource limits unbounded. Keep import approval blocked until
+duplicate ambiguity, reconciliation and atomic/concurrent posting are fully verified.
 
 ## Platform references
 
 - [Android notification listener](https://developer.android.com/reference/android/service/notification/NotificationListenerService)
 - [Android SMS intents](https://developer.android.com/reference/android/provider/Telephony.Sms.Intents)
 - [Expo development builds](https://docs.expo.dev/develop/development-builds/introduction/)
+
+## Bank statement extraction contract foundation (2026-11-04)
+
+The core now validates structured extraction output against a transaction-shaped contract using
+synthetic data. Rows keep page/excerpt evidence, a free-text category suggestion, and an explicitly
+unconfirmed recurrence suggestion. Missing fields are reviewable; malformed rows and non-EUR currency
+are rejected for correction. The extractor cannot select an owned account or recurring occurrence.
+Equal amount/date rows remain separate, and validation never writes transactions or approves inbox
+candidates.
+
+This does not yet read PDFs or call a model. The user expressed a preference for the OpenAI API, which
+needs reconciliation with the established local-model/privacy constraint before any statement content
+is transmitted. The requested file-read status table, review UI/category persistence, transaction
+posting, expense reports, and recurrence analysis remain future work. Approval stays blocked.
