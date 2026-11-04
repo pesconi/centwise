@@ -205,6 +205,11 @@ balances, paid/part-paid forecasts, and edits/deletions of linked transactions.
 Use synthetic fixtures; perform real-device capture and focused mobile/desktop review-UI checks.
 Apply generated migrations to local PostgreSQL before committing schema changes.
 
+Final delivery step for every session: update the continuity handoff with the
+validated result and generate a concise, copyable prompt for the next session
+that names the expected commit, next bounded slice, constraints, and validation
+commands. Include that prompt in the handoff and final response.
+
 ## Decisions needed before enabling posting or later integrations
 
 - First bank application/sender and synthetic examples of its message formats.

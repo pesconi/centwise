@@ -297,16 +297,34 @@ indexing/pagination in a separate slice, not silent omission of evidence.
 
 ## Next-session prompt
 
-Continue in `C:\projects\centwise`; read this handoff and
-[the import automation plan](./IMPORT-AUTOMATION-PLAN.md), then inspect git status and latest commit.
-Do not redo the visual settlement check or re-ask approved financial/provider decisions. Keep EUR cents,
-session-derived ownership, the UTC opening-balance boundary, and import posting blocked. The next slice
-has delivered read-only cross-source/manual duplicate suggestions. A next slice can define explicit,
-durable review decisions and reconciliation before any approval work; do not treat these hints as
-resolved duplicates or posting permission. Card
-accounting, suspicious internal transfers, mobile capture, and recurring suggestions remain gated.
-Use synthetic fixtures, run focused tests and `pnpm typecheck`, validate visually when the UI changes,
-commit only the validated slice, and do not push.
+Use this prompt to continue:
+
+```text
+Continue the Centwise work in C:\projects\centwise. First read AGENTS.md,
+docs/SESSION-HANDOFF-2026-11-04.md, and docs/IMPORT-AUTOMATION-PLAN.md. Then inspect
+the branch, git status, and latest commit; the expected starting point is main at
+917d712 (Fix recurring income month boundary). Preserve any local work and do not
+assume the expected state if the repository differs.
+
+Implement only the next narrow slice: durable user decisions for the existing
+read-only cross-source/manual duplicate suggestions. Before editing, trace the
+current suggestion API, persistence schema, and review UI. Confirm unresolved
+behavior with me before choosing decision granularity or effects (for example,
+what exactly a confirmation/dismissal attaches to and how it appears after data
+changes). Do not treat a suggestion as a resolved duplicate or permission to post.
+
+Keep import posting blocked in both the API and database. Do not merge, delete,
+auto-link, or suppress transactions; amount/date coincidence alone must never
+make a duplicate decision. Keep session-derived ownership, EUR integer cents,
+UTC boundaries, and all existing settlement behavior. Do not change card
+accounting, mobile capture, recurrence generation/suggestions, or PDF extraction.
+
+Use synthetic fixtures only. Run focused tests and pnpm typecheck; if a schema
+migration is required, generate it and verify it against the local PostgreSQL
+container. Update this handoff with the implementation, tests, limitations, and
+the following next-session prompt. Commit only the validated slice; do not push.
+Finish with a concise result and generate the prompt for the next session.
+```
 
 ## Bank Statement Extraction Contract Foundation
 
