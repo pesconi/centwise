@@ -59,11 +59,11 @@ export function calculateFreeToSpend(input: FreeToSpendInput): FreeToSpendResult
     const liquidBalanceCents = input.accounts
         .filter((account) => account.isActive)
         .reduce((total, account) => total + account.openingBalanceCents, 0) + input.transactions
-        .filter((transaction) => activeAccountIds.has(transaction.accountId) && transaction.occurredAt <= input.asOf)
-        .reduce(
-            (total, transaction) => total + (transaction.type === "income" ? transaction.amountInCents : -transaction.amountInCents),
-            0
-        );
+            .filter((transaction) => activeAccountIds.has(transaction.accountId) && transaction.occurredAt <= input.asOf)
+            .reduce(
+                (total, transaction) => total + (transaction.type === "income" ? transaction.amountInCents : -transaction.amountInCents),
+                0
+            );
     const remainingIncomeCents = input.recurringIncomes
         .filter((income) => income.isActive && occursAfterToday(income.expectedDayOfMonth, input.asOf))
         .reduce((total, income) => total + income.amountInCents, 0);
