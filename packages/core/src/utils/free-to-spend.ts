@@ -87,11 +87,13 @@ export function calculateFreeToSpend(input: FreeToSpendInput): FreeToSpendResult
                 0
             );
     const today = input.asOf.toISOString().slice(0, 10);
+    const currentMonth = today.slice(0, 7);
     const remainingIncomeCents = input.recurringOccurrences
         ? input.recurringOccurrences
             .filter((occurrence) => occurrence.type === "income"
                 && !occurrence.isCancelled
                 && !occurrence.isShortSettled
+                && occurrence.scheduledDate.slice(0, 7) === currentMonth
                 && occurrence.scheduledDate > today)
             .reduce((total, occurrence) => total + Math.max(occurrence.amountInCents - occurrence.settledAmountInCents, 0), 0)
         : input.recurringIncomes

@@ -13,7 +13,6 @@ describe.skipIf(!baseUrl)("recurring occurrence HTTP integration (synthetic data
         const currentDay = now.getUTCDate();
         const lastDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0)).getUTCDate();
         const nextDay = Math.min(currentDay + 1, lastDay);
-        const tomorrow = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), currentDay + 1)).toISOString().slice(0, 10);
 
         async function request(path, method = "GET", body, cookie) {
             return fetch(new URL(path, baseUrl), {
@@ -107,12 +106,14 @@ describe.skipIf(!baseUrl)("recurring occurrence HTTP integration (synthetic data
         expect(dueTodayIncome.date).toBe(today);
         const otherPlan = await plan(otherCookie);
         const foreignOccurrence = otherPlan.scheduledItems.find((item) => item.name === "Foreign synthetic bill");
+        const nextMonthDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)).toISOString().slice(0, 10);
         expect((await request(`/api/recurring-occurrences/${dueTodayIncome.id}`, "PATCH", {
             action: "reschedule",
-            scheduledDate: tomorrow
+            scheduledDate: nextMonthDate
         }, ownerCookie)).status).toBe(200);
         const rescheduledPlan = await plan(ownerCookie);
-        expect(rescheduledPlan.calculation.remainingIncomeCents).toBe((nextDay > currentDay ? 30_000 : 0) + 5_000);
+        expect(rescheduledPlan.calculation.remainingIncomeCents).toBe(nextDay > currentDay ? 30_000 : 0);
+        expect(rescheduledPlan.scheduledItems.find((item) => item.id === dueTodayIncome.id)?.date).toBe(nextMonthDate);
         expect((await request(
             "/api/transactions",
             "POST",
@@ -184,9 +185,9 @@ describe.skipIf(!baseUrl)("recurring occurrence HTTP integration (synthetic data
         expect((await request(`/api/transactions?transactionId=${payment.id}`, "PUT", {
             type: "income"
         }, ownerCookie)).status).toBe(409);
-        const nextMonthDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1, 12)).toISOString();
+        const nextMonthInstant = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1, 12)).toISOString();
         expect((await request(`/api/transactions?transactionId=${payment.id}`, "PUT", {
-            occurredAt: nextMonthDate,
+            occurredAt: nextMonthInstant,
             recurringOccurrenceId: monthEndBill.id
         }, ownerCookie)).status).toBe(409);
         expect((await request(`/api/transactions?transactionId=${payment.id}`, "PUT", {

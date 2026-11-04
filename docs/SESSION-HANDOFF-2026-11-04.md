@@ -316,3 +316,25 @@ commit only the validated slice, and do not push.
 - Synthetic contract tests cover valid endpoint-shaped rows, malformed/uncertain rows, unsupported currency, forbidden ownership/occurrence fields, and equal-value rows retained independently.
 - At the time this contract foundation was committed, it did not read PDFs or call a model. The authenticated OpenAI preview and metadata-only read table are now implemented in the continuation slice above.
 - The occurrence code and migration `0003_flat_blade` were local changes before the extraction-contract commit. Its earlier HTTP/browser validation gaps were resolved in the latest slice above. Import posting remains blocked.
+
+## Current continuation slice: recurring-income month boundary (2026-11-04)
+
+Started on `main` at the requested reference commit `6b911e5`, with a clean working tree.
+
+- A recurring income occurrence can still be rescheduled into a later month. The plan API continues
+  to return the occurrence with its effective rescheduled date; it is not hidden or rejected.
+- The calculation now adds an unreceived occurrence to this month's forecast only when its scheduled
+  date is both later than today and within the current UTC year/month. Income rescheduled to a later
+  month therefore does not increase this month's available amount.
+- Income received through a linked transaction changes liquid cash once and reduces the forecast
+  remainder. Overdue unreceived income remains excluded; overdue bills remain reserved. Cancellation,
+  partial settlement, short settlement, and other settlement behavior are unchanged.
+- No recurrence generation, investment, category, import, or posting behavior changed. Import posting
+  remains blocked.
+
+Validation used synthetic fixtures only:
+
+- `pnpm --filter @centwise/core exec vitest run src/utils/free-to-spend.test.ts`: 18 passed.
+- `CENTWISE_TEST_BASE_URL=http://localhost:3001 pnpm --filter @centwise/core exec vitest run src/integration/recurring-occurrences.test.mjs`: 1 HTTP integration passed, including cross-month rescheduling and plan visibility.
+- `pnpm typecheck`: all 5 typecheck tasks passed.
+- `git diff --check`: passed.

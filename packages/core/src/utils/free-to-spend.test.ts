@@ -227,11 +227,41 @@ describe("calculateFreeToSpend", () => {
             recurringOccurrences: [
                 { type: "bill", amountInCents: 7_000, settledAmountInCents: 2_000, scheduledDate: "2026-11-20", isCancelled: false, isShortSettled: false },
                 { type: "income", amountInCents: 20_000, settledAmountInCents: 0, scheduledDate: "2026-11-20", isCancelled: false, isShortSettled: false },
-                { type: "income", amountInCents: 30_000, settledAmountInCents: 5_000, scheduledDate: "2026-12-05", isCancelled: false, isShortSettled: false }
+                { type: "income", amountInCents: 30_000, settledAmountInCents: 5_000, scheduledDate: "2026-12-05", isCancelled: false, isShortSettled: false },
+                { type: "income", amountInCents: 40_000, settledAmountInCents: 0, scheduledDate: "2027-01-05", isCancelled: false, isShortSettled: false }
             ]
         }));
 
         expect(result.remainingBillsCents).toBe(5_000);
         expect(result.remainingIncomeCents).toBe(25_000);
+    });
+
+    it("counts future income only within the current UTC month and counts receipts once across year boundaries", () => {
+        const input = createInput({
+            asOf: new Date("2026-12-30T23:59:59.999Z"),
+            transactions: [
+                { accountId: "account-1", amountInCents: 3_000, type: "income", occurredAt: new Date("2026-12-30T23:59:59.999Z") }
+            ],
+            recurringOccurrences: [
+                { type: "income", amountInCents: 10_000, settledAmountInCents: 3_000, scheduledDate: "2026-12-31", isCancelled: false, isShortSettled: false },
+                { type: "income", amountInCents: 8_000, settledAmountInCents: 0, scheduledDate: "2026-12-31", isCancelled: true, isShortSettled: false },
+                { type: "income", amountInCents: 9_000, settledAmountInCents: 0, scheduledDate: "2026-12-31", isCancelled: false, isShortSettled: true },
+                { type: "income", amountInCents: 20_000, settledAmountInCents: 0, scheduledDate: "2027-01-01", isCancelled: false, isShortSettled: false },
+                { type: "income", amountInCents: 30_000, settledAmountInCents: 0, scheduledDate: "2026-12-29", isCancelled: false, isShortSettled: false },
+                { type: "income", amountInCents: 15_000, settledAmountInCents: 0, scheduledDate: "2027-01-05", isCancelled: false, isShortSettled: false },
+                { type: "bill", amountInCents: 7_000, settledAmountInCents: 2_000, scheduledDate: "2026-11-20", isCancelled: false, isShortSettled: false }
+            ]
+        });
+
+        const beforeUtcBoundary = calculateFreeToSpend(input);
+        expect(beforeUtcBoundary.liquidBalanceCents).toBe(103_000);
+        expect(beforeUtcBoundary.remainingIncomeCents).toBe(7_000);
+        expect(beforeUtcBoundary.remainingBillsCents).toBe(5_000);
+
+        input.asOf = new Date("2026-12-31T00:00:00.000Z");
+        expect(calculateFreeToSpend(input).remainingIncomeCents).toBe(0);
+
+        input.asOf = new Date("2027-01-01T00:00:00.000Z");
+        expect(calculateFreeToSpend(input).remainingIncomeCents).toBe(15_000);
     });
 });
