@@ -1,0 +1,158 @@
+# Bank message and PDF import plan
+
+Date: 2026-11-04
+Status: planned; no ingestion implementation yet.
+
+## Confirmed scope
+
+- Android first, installed directly as an APK.
+- Capture both bank SMS messages and bank application notifications.
+- Import bank statements, credit-card statements, and bills as PDFs.
+- Require review before posting initially. Automatic posting of trusted patterns is a later, separately enabled feature.
+- Preserve manual entry and editing as correction/fallback paths.
+- Keep monetary values in integer cents and EUR. Do not silently convert other currencies.
+
+## Current repository constraints
+
+- The Expo mobile application is a placeholder, without authentication or native capture.
+- Web authentication uses an HTTP-only session cookie; mobile needs a deliberately implemented authenticated session and device lifecycle.
+- Existing transactions require an owned account. Recurring bills/income are forecasts, not payment records.
+- The spending engine deducts remaining recurring bills independently of recorded transactions. Imported payments must not cause both a transaction deduction and the same forecast deduction.
+- No import inbox, source provenance, document storage, background worker, or reconciliation model exists yet.
+- Existing opening balances have no effective-date boundary. Historical imports must not be added on top of a balance that already includes them.
+
+## Target flow
+
+Android capture or PDF upload -> source event/document -> extraction -> validated candidate
+-> duplicate/reconciliation checks -> review inbox -> atomic approval -> financial records.
+
+Capture and extraction do not directly write transactions. Each candidate retains provenance and a visible status:
+pending review, needs information, duplicate, approved, rejected, or failed.
+Retries must not create additional financial records. Failed extraction is not an empty successful import.
+
+## 1. Shared import foundation and financial correctness
+
+Build the backend inbox and minimal web review UI first, tested with synthetic fixtures.
+
+- Persist import sources, source identifiers/fingerprints, candidate fields, parser/model version,
+  extraction evidence, validation issues, review decisions, and the final linked financial record.
+- Derive user ownership from authentication, including owned account, device, and document checks.
+- Use a unique user/source event key for exact retry idempotency. Amount/date similarity alone
+  must not suppress two legitimate equal purchases.
+- Surface likely cross-source duplicates for review: SMS plus notification, PDF plus message,
+  and previously entered manual transactions. Preserve evidence from all linked sources.
+- Approval is transactional and repeat-safe, including concurrent requests.
+- Allow correction of amount, direction, date, description, and account before approval.
+- Never infer debit/credit from the bank balance shown in a message.
+- Store source transaction date/time separately from capture time; require review if date,
+  account, currency, or direction is ambiguous.
+- Introduce an explicit account balance effective date and historical-import policy before
+  applying older movements. Historical evidence may inform forecasts without changing today's balance.
+- Represent expected monthly occurrences and their settlement links so a matched payment
+  replaces the outstanding obligation rather than being deducted twice. Cover partial payments,
+  edited payments, deleted payments, income receipts, and month-end day clamping.
+- Do not create a recurring rule from a single transaction without confirmation.
+
+Credit cards need a product decision before posting card PDFs: purchases, card liability,
+statement settlement, and transfers between owned accounts cannot all be treated as independent expenses.
+Until that model is approved, card documents may create review candidates and forecast suggestions,
+but not automatic financial postings. Apply the same review restriction to suspected internal transfers.
+
+Acceptance: identical retry/concurrent approval creates exactly one posting; equal independent purchases
+remain separate; settled obligations are counted once; pre-balance history does not change current cash.
+
+## 2. Android capture
+
+- Add mobile login, secure session storage, device pairing/revocation, and authenticated sync over HTTPS.
+- Use a local native Expo module/config plugin and locally built Android APK; Expo Go cannot run
+  arbitrary new native receivers/services. Check compatibility against the installed Expo SDK.
+- SMS: receive new SMS with explicitly granted receive permission; reconstruct multipart messages.
+  Do not request historical SMS reading for this initial scope.
+- Bank notifications: use Android NotificationListenerService with access enabled by the user
+  in system settings. This is separate from permission to display the app's own notifications.
+- Let the user select bank applications/senders. Filter locally before persisting or syncing.
+  Ignore OTPs, verification codes, marketing, and unrelated notifications.
+- Parse known bank templates deterministically on the device when practical. Sender names alone
+  do not prove authenticity; all candidates still require review initially.
+- Store a protected, bounded offline queue with stable event IDs; retry with backoff and acknowledgments.
+  Treat notification updates/reposts as updates or duplicates, not additional purchases.
+- Provide visible capture/permission/sync status, pause controls, and deletion/disconnect actions.
+- Do not promise complete capture: hidden text, revoked access, force-stop, OEM battery policies,
+  RCS rather than SMS, and missed/disconnected notifications can prevent collection.
+
+Acceptance on a real Android device: synthetic SMS/notification, multipart SMS, repost, offline retry,
+permission denial/revocation, app restart, and duplicate SMS+notification all behave as documented.
+No bank credentials or accessibility-service scraping is required.
+
+## 3. PDF import with local AI
+
+- Add authenticated upload with owned account selection, source/document type, and statement period.
+- Validate PDF content/signature and configured size/page limits before processing; enforce resource
+  limits and isolate parsing. Do not execute embedded scripts or follow embedded links.
+- Store originals privately outside public assets, with ownership-enforced retrieval/deletion.
+- Use an asynchronous persisted job with explicit progress, retries, and cancellation/failure status.
+- Extract selectable text first; use local OCR for scanned pages. Report encrypted/unreadable documents
+  explicitly rather than pretending extraction succeeded.
+- Run extraction with a locally hosted model on the self-hosted server. Choose model/runtime after a
+  hardware and synthetic-document quality check; do not send financial documents to external services.
+- Treat document text as untrusted data, never instructions. Give the extractor no tools or write access.
+- Require schema-constrained output and validate cents, currency, dates, direction, account association,
+  totals, and row types. Preserve page/evidence references for each suggested item.
+- Separate opening/closing balances, subtotals, transactions, forecasts, and statement payments.
+  Do not import summary amounts as additional movements.
+- Exact file hashes make reuploads idempotent; overlapping statement periods need transaction-level
+  reconciliation, not merely file deduplication.
+- Preview/correct/approve extracted items in the same inbox as message candidates.
+- Set explicit retention/deletion rules for originals, extracted text, local queue, and evidence.
+  Keep raw financial content out of logs, telemetry, repository fixtures, and external services.
+
+Acceptance: selectable-text and scanned fixtures, overlapping/reuploaded statements, invalid files,
+encrypted documents, incorrect totals, and instruction-like PDF text produce correct candidates
+or explicit review/failure states, never silent financial postings.
+
+## 4. Recurring-spend prediction
+
+- Analyze reviewed, deduplicated historical movements and confirmed bill documents.
+- Suggest recurring merchant, expected date/window, frequency, typical amount/range, and variability,
+  with evidence and explanation. Allow rejection and correction.
+- Match against existing recurring rules before offering a new one.
+- Distinguish forecast changes from already settled occurrences.
+- Start with deterministic recurrence detection on reviewed history; add model assistance only where
+  measured extraction or matching quality warrants it.
+- Require confirmation before a suggestion changes protected funds/free-to-spend.
+- Later automation is opt-in per trusted source/template, with measurable fixture accuracy,
+  auditability, undo, and fallback to review for ambiguity or changed message formats.
+  Model self-reported confidence is not an approval criterion.
+
+## Delivery order and validation
+
+1. Import inbox, idempotent review/approval, balance-date policy, and settlement correctness.
+2. Mobile authentication and one known bank's SMS format, then notification capture and offline sync.
+3. PDF upload, local extraction/OCR/AI, and inbox preview; card posting remains gated.
+4. Recurrence suggestions and only then opt-in automation.
+
+Implement one validated, documented commit-sized slice per session. No broad mobile parity or
+bank API integrations are implied. Before each slice, confirm any unresolved behavior choices.
+
+Run focused schema/parser/API/calculation tests and workspace typecheck. Exercise ownership isolation,
+concurrent approvals, duplicate evidence, amount signs, decimal formats, month boundaries, negative
+balances, paid/part-paid forecasts, and edits/deletions of linked transactions.
+Use synthetic fixtures; perform real-device capture and focused mobile/desktop review-UI checks.
+Apply generated migrations to local PostgreSQL before committing schema changes.
+
+## Decisions needed before implementation
+
+- First bank application/sender and synthetic examples of its message formats.
+- Account effective-date semantics and card/transfer accounting behavior.
+- Android device/version and backend connectivity while away from home.
+- Server RAM/CPU/GPU for local OCR/model selection and extraction throughput.
+- Explicit upload limits and retention periods.
+
+Recommended next session: implement only item 1's inbox/idempotency foundation, resolving the
+balance-date and settlement behavior before enabling imported financial postings.
+
+## Platform references
+
+- [Android notification listener](https://developer.android.com/reference/android/service/notification/NotificationListenerService)
+- [Android SMS intents](https://developer.android.com/reference/android/provider/Telephony.Sms.Intents)
+- [Expo development builds](https://docs.expo.dev/develop/development-builds/introduction/)

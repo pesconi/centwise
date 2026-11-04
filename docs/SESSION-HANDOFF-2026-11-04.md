@@ -44,4 +44,4 @@ The dashboard supports inline edits for upcoming recurring income/bills and reco
 
 ## Prompt For The Next Session
 
-Continue in `c:\projects\centwise`. Read `AGENTS.md` and this handoff, then inspect the current branch and working tree. Phase 4 and inline entry editing are complete; do not redo them. Confirm the next product slice before implementation rather than assuming mobile parity, transaction classification, household features, or bank integrations. Do not push.
+Continue in `c:\projects\centwise`. Read `AGENTS.md`, this handoff, and [the import automation plan](./IMPORT-AUTOMATION-PLAN.md), then inspect the current branch and working tree. Phase 4 and inline entry editing are complete; do not redo them. The next planned product work is reviewed bank-message/PDF import: Android APK, both SMS and bank notifications, with local AI for PDFs. Only planning has been done. Start with the shared inbox/idempotency foundation; resolve balance effective dates, settlement reconciliation, and card accounting before imported postings. Implement one slice per session; do not push.
