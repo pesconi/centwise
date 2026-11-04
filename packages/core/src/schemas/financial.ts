@@ -20,12 +20,17 @@ export const financialSettingsSchema = z.object({
 export const accountSchema = z.object({
     name: nameSchema,
     openingBalanceCents: z.number().int(),
+    openingBalanceDate: z.string().date(),
     currency: currencySchema
 });
 
 export const accountUpdateSchema = accountSchema.partial().extend({
     isActive: z.boolean().optional()
-}).refine((value) => Object.keys(value).length > 0, "At least one account field is required.");
+}).refine((value) => Object.keys(value).length > 0, "At least one account field is required.")
+    .refine(
+        (value) => (value.openingBalanceCents === undefined) === (value.openingBalanceDate === undefined),
+        "Confirm the opening balance and its effective date together."
+    );
 
 export const recurringIncomeSchema = z.object({
     name: nameSchema,

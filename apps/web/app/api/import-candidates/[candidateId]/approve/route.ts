@@ -1,3 +1,4 @@
+import { importPostingBlockers } from "@centwise/core";
 import { db, schema } from "@centwise/database";
 import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
@@ -10,10 +11,6 @@ interface RouteContext {
 }
 
 const candidateIdSchema = z.string().uuid();
-const postingBlockers = [
-  "Opening-balance effective-date policy has not been decided.",
-  "Recurring obligation settlement and reconciliation have not been implemented.",
-];
 
 export async function POST(
   _request: Request,
@@ -55,7 +52,7 @@ export async function POST(
     {
       error: "Import posting is blocked.",
       postingBlocked: true,
-      blockers: postingBlockers,
+      blockers: importPostingBlockers,
     },
     { status: 409 },
   );

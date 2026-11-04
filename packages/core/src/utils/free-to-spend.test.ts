@@ -16,6 +16,95 @@ function createInput(overrides: Partial<FreeToSpendInput> = {}): FreeToSpendInpu
 }
 
 describe("calculateFreeToSpend", () => {
+    it.each(["2027-01-01", "2026-03-01", "2028-02-29", "2028-03-01"])(
+        "applies the exact UTC boundary across calendar transitions: %s",
+        (openingBalanceDate) => {
+            const boundary = new Date(`${openingBalanceDate}T00:00:00Z`);
+            const result = calculateFreeToSpend(createInput({
+                asOf: boundary,
+                accounts: [{ id: "account-1", openingBalanceCents: 100_000, openingBalanceDate, isActive: true }],
+                transactions: [
+                    { accountId: "account-1", amountInCents: 50_000, type: "expense", occurredAt: new Date(boundary.getTime() - 1) },
+                    { accountId: "account-1", amountInCents: 5_000, type: "income", occurredAt: boundary }
+                ]
+            }));
+            expect(result.liquidBalanceCents).toBe(105_000);
+        }
+    );
+
+    it("keeps pre-balance history out of cash and includes movements at UTC midnight", () => {
+        const input = createInput({
+            asOf: new Date("2026-11-04T12:00:00.000Z"),
+            accounts: [{ id: "account-1", openingBalanceCents: 100_000, openingBalanceDate: "2026-11-04", isActive: true }],
+            transactions: [
+                { accountId: "account-1", amountInCents: 10_000, type: "expense", occurredAt: new Date("2026-11-03T23:59:59.999Z") },
+                { accountId: "account-1", amountInCents: 50_000, type: "income", occurredAt: new Date("2026-11-03T12:00:00.000Z") }
+            ]
+        });
+        expect(calculateFreeToSpend(input).liquidBalanceCents).toBe(100_000);
+        input.transactions.push({ accountId: "account-1", amountInCents: 10_000, type: "expense", occurredAt: new Date("2026-11-04T00:00:00.000Z") });
+        expect(calculateFreeToSpend(input).liquidBalanceCents).toBe(90_000);
+        expect(input.transactions).toHaveLength(3);
+    });
+
+    it("uses each account's own UTC boundary, including dates expressed in other time zones", () => {
+        const result = calculateFreeToSpend(createInput({
+            asOf: new Date("2026-11-04T12:00:00.000Z"),
+            accounts: [
+                { id: "account-1", openingBalanceCents: 100_000, openingBalanceDate: "2026-11-04", isActive: true },
+                { id: "account-2", openingBalanceCents: -5_000, openingBalanceDate: "2026-11-03", isActive: true }
+            ],
+            transactions: [
+                { accountId: "account-1", amountInCents: 10_000, type: "expense", occurredAt: new Date("2026-11-04T01:00:00+02:00") },
+                { accountId: "account-1", amountInCents: 2_000, type: "income", occurredAt: new Date("2026-11-03T23:00:00-02:00") },
+                { accountId: "account-2", amountInCents: 3_000, type: "expense", occurredAt: new Date("2026-11-03T00:00:00Z") },
+                { accountId: "not-owned", amountInCents: 99_999, type: "income", occurredAt: new Date("2026-11-04T00:00:00Z") },
+                { accountId: "account-1", amountInCents: 50_000, type: "income", occurredAt: new Date("2026-11-05T00:00:00Z") }
+            ],
+            safetyReserveCents: 10_000
+        }));
+        expect(result.liquidBalanceCents).toBe(94_000);
+        expect(result.freeToSpendCents).toBe(84_000);
+    });
+
+    it("preserves undated legacy balances without inferring an effective date", () => {
+        const result = calculateFreeToSpend(createInput({
+            accounts: [{ id: "account-1", openingBalanceCents: 100_000, openingBalanceDate: null, isActive: true }],
+            transactions: [{ accountId: "account-1", amountInCents: 10_000, type: "expense", occurredAt: new Date("2020-01-01T00:00:00Z") }]
+        }));
+        expect(result.liquidBalanceCents).toBe(90_000);
+    });
+
+    it("does not include a balance before its effective date or from an inactive account", () => {
+        const result = calculateFreeToSpend(createInput({
+            accounts: [
+                { id: "account-1", openingBalanceCents: 100_000, openingBalanceDate: "2026-11-04", isActive: true },
+                { id: "inactive", openingBalanceCents: 100_000, openingBalanceDate: "2026-11-01", isActive: false }
+            ],
+            transactions: [
+                { accountId: "account-1", amountInCents: 10_000, type: "income", occurredAt: new Date("2026-11-01T00:00:00Z") },
+                { accountId: "inactive", amountInCents: 10_000, type: "income", occurredAt: new Date("2026-11-01T00:00:00Z") }
+            ]
+        }));
+        expect(result.liquidBalanceCents).toBe(0);
+    });
+
+    it("recalculates edits and deletions across the balance boundary without a cached adjustment", () => {
+        const transaction = { accountId: "account-1", amountInCents: 10_000, type: "expense" as const, occurredAt: new Date("2026-11-03T00:00:00Z") };
+        const input = createInput({
+            asOf: new Date("2026-11-05T12:00:00Z"),
+            accounts: [{ id: "account-1", openingBalanceCents: 100_000, openingBalanceDate: "2026-11-04", isActive: true }],
+            transactions: [transaction]
+        });
+        expect(calculateFreeToSpend(input).liquidBalanceCents).toBe(100_000);
+        transaction.occurredAt = new Date("2026-11-04T00:00:00Z");
+        expect(calculateFreeToSpend(input).liquidBalanceCents).toBe(90_000);
+        transaction.amountInCents = 20_000;
+        expect(calculateFreeToSpend(input).liquidBalanceCents).toBe(80_000);
+        input.transactions = [];
+        expect(calculateFreeToSpend(input).liquidBalanceCents).toBe(100_000);
+    });
+
     it("combines the current liquid balance with future income and remaining obligations", () => {
         const result = calculateFreeToSpend(createInput({
             transactions: [

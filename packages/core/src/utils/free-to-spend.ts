@@ -1,6 +1,7 @@
 export interface FreeToSpendAccount {
     id: string;
     openingBalanceCents: number;
+    openingBalanceDate?: string | null;
     isActive: boolean;
 }
 
@@ -56,12 +57,21 @@ function isDueTodayOrLater(dayOfMonth: number, asOf: Date): boolean {
     return Math.min(dayOfMonth, getLastDayOfMonth(asOf)) >= asOf.getUTCDate();
 }
 
+export function isHistoricalTransaction(occurredAt: Date, openingBalanceDate: string | null | undefined): boolean {
+    return Boolean(openingBalanceDate && occurredAt < new Date(`${openingBalanceDate}T00:00:00.000Z`));
+}
+
 export function calculateFreeToSpend(input: FreeToSpendInput): FreeToSpendResult {
-    const activeAccountIds = new Set(input.accounts.filter((account) => account.isActive).map((account) => account.id));
-    const liquidBalanceCents = input.accounts
-        .filter((account) => account.isActive)
+    const activeAccounts = new Map(input.accounts
+        .filter((account) => account.isActive && !isHistoricalTransaction(input.asOf, account.openingBalanceDate))
+        .map((account) => [account.id, account]));
+    const liquidBalanceCents = [...activeAccounts.values()]
         .reduce((total, account) => total + account.openingBalanceCents, 0) + input.transactions
-            .filter((transaction) => activeAccountIds.has(transaction.accountId) && transaction.occurredAt <= input.asOf)
+            .filter((transaction) => {
+                const account = activeAccounts.get(transaction.accountId);
+                return account !== undefined && transaction.occurredAt <= input.asOf
+                    && !isHistoricalTransaction(transaction.occurredAt, account.openingBalanceDate);
+            })
             .reduce(
                 (total, transaction) => total + (transaction.type === "income" ? transaction.amountInCents : -transaction.amountInCents),
                 0

@@ -1,5 +1,6 @@
 "use client";
 
+import { isHistoricalTransaction } from "@centwise/core";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FormEvent, useState } from "react";
 
@@ -22,6 +23,7 @@ interface Account {
     id: string;
     name: string;
     openingBalanceCents: number;
+    openingBalanceDate: string | null;
     currency: "EUR";
     isActive: boolean;
 }
@@ -169,7 +171,7 @@ export function FinanceDashboard() {
     });
 
     const accountMutation = useMutation({
-        mutationFn: (account: Omit<Account, "id" | "isActive">) =>
+        mutationFn: (account: Omit<Account, "id" | "isActive"> & { openingBalanceDate: string }) =>
             requestJson<{ account: Account }>("/api/accounts", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -182,9 +184,25 @@ export function FinanceDashboard() {
         }
     });
 
+    const balanceReferenceMutation = useMutation({
+        mutationFn: ({ accountId, openingBalanceCents, openingBalanceDate }: {
+            accountId: string;
+            openingBalanceCents: number;
+            openingBalanceDate: string;
+        }) => requestJson<{ account: Account }>(`/api/accounts/${accountId}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ openingBalanceCents, openingBalanceDate })
+        }),
+        onSuccess: async () => {
+            await queryClient.invalidateQueries({ queryKey: ["accounts"] });
+            await queryClient.invalidateQueries({ queryKey: ["free-to-spend"] });
+        }
+    });
+
     const onboardingMutation = useMutation({
         mutationFn: (onboarding: {
-            account?: Omit<Account, "id" | "isActive">;
+            account?: Omit<Account, "id" | "isActive"> & { openingBalanceDate: string };
             recurringIncomes: { name: string; amountInCents: number; expectedDayOfMonth: number }[];
             recurringBills: { name: string; amountInCents: number; dueDayOfMonth: number }[];
             safetyReserveCents: number;
@@ -384,10 +402,29 @@ export function FinanceDashboard() {
             {
                 name: String(formData.get("name")),
                 openingBalanceCents,
+                openingBalanceDate: String(formData.get("openingBalanceDate")),
                 currency: "EUR"
             },
             { onSuccess: () => form.reset() }
         );
+    }
+
+    function handleBalanceReferenceSubmit(event: FormEvent<HTMLFormElement>, accountId: string) {
+        event.preventDefault();
+        setAccountFormError(null);
+        const formData = new FormData(event.currentTarget);
+        const openingBalanceCents = Math.round(Number(formData.get("openingBalance")) * 100);
+
+        if (!Number.isSafeInteger(openingBalanceCents)) {
+            setAccountFormError("Enter a valid opening balance.");
+            return;
+        }
+
+        balanceReferenceMutation.mutate({
+            accountId,
+            openingBalanceCents,
+            openingBalanceDate: String(formData.get("openingBalanceDate"))
+        });
     }
 
     function handleOnboardingSubmit(event: FormEvent<HTMLFormElement>) {
@@ -437,7 +474,7 @@ export function FinanceDashboard() {
             return;
         }
 
-        let account: Omit<Account, "id" | "isActive"> | undefined;
+        let account: (Omit<Account, "id" | "isActive"> & { openingBalanceDate: string }) | undefined;
 
         if (accounts.length === 0) {
             const name = String(formData.get("accountName") ?? "").trim();
@@ -448,7 +485,7 @@ export function FinanceDashboard() {
                 return;
             }
 
-            account = { name, openingBalanceCents, currency: "EUR" };
+            account = { name, openingBalanceCents, openingBalanceDate: String(formData.get("openingBalanceDate")), currency: "EUR" };
         }
 
         onboardingMutation.mutate({
@@ -471,11 +508,7 @@ export function FinanceDashboard() {
     const transactions = transactionsQuery.data?.transactions ?? [];
     const accounts = accountsQuery.data?.accounts.filter((account) => account.isActive) ?? [];
     const activeAccountId = selectedAccountId ?? accounts[0]?.id ?? "";
-    const activeAccountIds = new Set(accounts.map((account) => account.id));
-    const balanceInCents = accounts.reduce((total, account) => total + account.openingBalanceCents, 0) + transactions.filter((transaction) => activeAccountIds.has(transaction.accountId)).reduce(
-        (total, transaction) => total + (transaction.type === "income" ? transaction.amountInCents : -transaction.amountInCents),
-        0
-    );
+    const accountsById = new Map((accountsQuery.data?.accounts ?? []).map((account) => [account.id, account]));
     const calculation = freeToSpendQuery.data?.calculation;
     const scheduledItems = freeToSpendQuery.data?.scheduledItems ?? [];
     const periodEndDate = freeToSpendQuery.data?.periodEndDate;
@@ -539,10 +572,14 @@ export function FinanceDashboard() {
                                         <label className="grid gap-2 text-sm font-semibold" htmlFor="setupAccountName">Account name
                                             <input className="h-11 border border-ink/20 bg-canvas px-3 outline-none ring-spruce focus:ring-2" autoComplete="off" id="setupAccountName" name="accountName" placeholder="Main account" required />
                                         </label>
-                                        <label className="grid gap-2 text-sm font-semibold" htmlFor="setupOpeningBalance">Balance today (EUR)
+                                        <label className="grid gap-2 text-sm font-semibold" htmlFor="setupOpeningBalance">Opening balance (EUR)
                                             <input className="h-11 border border-ink/20 bg-canvas px-3 outline-none ring-spruce focus:ring-2" defaultValue="0.00" id="setupOpeningBalance" min="0" name="openingBalance" required step="0.01" type="number" />
                                         </label>
                                     </div>
+                                    <label className="grid gap-2 text-sm font-semibold" htmlFor="setupOpeningBalanceDate">Balance effective date (UTC)
+                                        <input className="h-11 border border-ink/20 bg-canvas px-3 outline-none ring-spruce focus:ring-2" defaultValue={new Date().toISOString().slice(0, 10)} id="setupOpeningBalanceDate" name="openingBalanceDate" required type="date" />
+                                    </label>
+                                    <p className="text-sm text-ink/60">Use the balance at the start of this day (00:00 UTC), before any movements that day. Earlier transactions remain history only.</p>
                                 </fieldset>
                             ) : null}
 
@@ -620,7 +657,7 @@ export function FinanceDashboard() {
                         <section className="border-t-4 border-spruce bg-white p-6 shadow-[0_20px_50px_-32px_rgba(23,33,29,0.45)] sm:p-8">
                             <p className="text-sm font-semibold uppercase tracking-[0.14em] text-ink/55">Free to spend</p>
                             <p className={`mt-4 text-5xl font-semibold tracking-tight ${calculation && calculation.freeToSpendCents < 0 ? "text-red-700" : "text-ink"}`}>{calculation ? formatCurrency(calculation.freeToSpendCents, "EUR") : "--"}</p>
-                            <p className="mt-3 text-sm text-ink/60">Current liquid balance: {formatCurrency(balanceInCents, "EUR")} across {accounts.length} active {accounts.length === 1 ? "account" : "accounts"}.</p>
+                            <p className="mt-3 text-sm text-ink/60">Current liquid balance: {calculation ? formatCurrency(calculation.liquidBalanceCents, "EUR") : "--"} across {accounts.length} active {accounts.length === 1 ? "account" : "accounts"}.</p>
                             {calculation ? (
                                 <div className="mt-6 border-l-2 border-spruce/40 pl-4">
                                     <p className="text-sm font-semibold uppercase tracking-[0.1em] text-spruce">Safe spending per day</p>
@@ -639,13 +676,16 @@ export function FinanceDashboard() {
                                 <form className="mt-10 grid gap-4 border-t border-ink/10 pt-8" onSubmit={handleAccountSubmit}>
                                     <div>
                                         <h2 className="text-xl font-semibold">Add your first account</h2>
-                                        <p className="mt-1 text-sm text-ink/60">Start from the balance you have today.</p>
+                                        <p className="mt-1 text-sm text-ink/60">Use the balance at the start of the selected UTC day, before that day&apos;s movements.</p>
                                     </div>
                                     <label className="grid gap-2 text-sm font-semibold" htmlFor="accountName">Account name
                                         <input className="h-11 border border-ink/20 bg-canvas px-3 outline-none ring-spruce focus:ring-2" id="accountName" name="name" placeholder="Main account" required />
                                     </label>
                                     <label className="grid gap-2 text-sm font-semibold" htmlFor="openingBalance">Opening balance (EUR)
                                         <input className="h-11 border border-ink/20 bg-canvas px-3 outline-none ring-spruce focus:ring-2" id="openingBalance" name="openingBalance" placeholder="0.00" required step="0.01" type="number" />
+                                    </label>
+                                    <label className="grid gap-2 text-sm font-semibold" htmlFor="openingBalanceDate">Balance effective date (UTC)
+                                        <input className="h-11 border border-ink/20 bg-canvas px-3 outline-none ring-spruce focus:ring-2" defaultValue={new Date().toISOString().slice(0, 10)} id="openingBalanceDate" name="openingBalanceDate" required type="date" />
                                     </label>
                                     <button className="h-11 bg-spruce px-4 font-semibold text-white transition hover:bg-ink disabled:cursor-not-allowed disabled:opacity-60" disabled={accountMutation.isPending} type="submit">
                                         {accountMutation.isPending ? "Saving account..." : "Add account"}
@@ -654,6 +694,28 @@ export function FinanceDashboard() {
                                     {accountMutation.isError ? <p className="text-sm text-red-700">{accountMutation.error.message}</p> : null}
                                 </form>
                             ) : null}
+
+                            {accounts.map((account) => (
+                                <form className="mt-6 grid gap-3 border-l-2 border-spruce/30 pl-4" key={account.id} onSubmit={(event) => handleBalanceReferenceSubmit(event, account.id)}>
+                                    <h3 className="font-semibold">{account.name}: balance reference</h3>
+                                    <p className="text-sm text-ink/60">
+                                        {account.openingBalanceDate
+                                            ? `Effective from ${account.openingBalanceDate} at 00:00 UTC.`
+                                            : "No effective date confirmed. Legacy balance calculation is preserved; future import posting requires confirmation."}
+                                        {" "}Confirm the balance before movements on the selected day. Saving recalculates cash; earlier movements remain history only.
+                                    </p>
+                                    <label className="grid gap-1 text-sm font-semibold">Opening balance (EUR)
+                                        <input className="h-10 border border-ink/20 bg-white px-3 outline-none ring-spruce focus:ring-2" defaultValue={(account.openingBalanceCents / 100).toFixed(2)} name="openingBalance" required step="0.01" type="number" />
+                                    </label>
+                                    <label className="grid gap-1 text-sm font-semibold">Balance effective date (UTC)
+                                        <input className="h-10 border border-ink/20 bg-white px-3 outline-none ring-spruce focus:ring-2" defaultValue={account.openingBalanceDate ?? ""} name="openingBalanceDate" required type="date" />
+                                    </label>
+                                    <button className="h-10 bg-spruce px-4 text-sm font-semibold text-white disabled:opacity-60" disabled={balanceReferenceMutation.isPending} type="submit">Confirm opening balance</button>
+                                    {balanceReferenceMutation.isSuccess && balanceReferenceMutation.variables.accountId === account.id ? <p className="text-sm text-spruce">Balance reference saved.</p> : null}
+                                </form>
+                            ))}
+                            {accounts.length > 0 && accountFormError ? <p className="mt-3 text-sm text-red-700">{accountFormError}</p> : null}
+                            {balanceReferenceMutation.isError ? <p className="mt-3 text-sm text-red-700">{balanceReferenceMutation.error.message}</p> : null}
 
                             <form className="mt-10 grid gap-4" onSubmit={handleTransactionSubmit}>
                                 <div className="grid gap-2">
@@ -799,6 +861,9 @@ export function FinanceDashboard() {
                                                 <div className="min-w-0">
                                                     <p className="truncate font-semibold">{transaction.description ?? "Untitled transaction"}</p>
                                                     <p className="mt-1 text-sm text-ink/55">{new Date(transaction.occurredAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</p>
+                                                    {isHistoricalTransaction(new Date(transaction.occurredAt), accountsById.get(transaction.accountId)?.openingBalanceDate) ? (
+                                                        <p className="mt-1 text-xs text-ink/60">History only: before the opening balance date. No cash impact.</p>
+                                                    ) : null}
                                                 </div>
                                                 <div className="flex shrink-0 items-center gap-3">
                                                     <p className={`font-semibold ${transaction.type === "expense" ? "text-red-700" : "text-spruce"}`}>{transaction.type === "expense" ? "-" : "+"}{formatCurrency(transaction.amountInCents, transaction.currency)}</p>

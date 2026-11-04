@@ -14,7 +14,7 @@ Completed and committed:
 
 The onboarding collects an opening account balance when needed, optional monthly recurring income and bills, monthly investments, and safety reserve. The onboarding endpoint writes these records atomically. The authenticated free-to-spend endpoint feeds the dashboard.
 
-The pure calculation engine is in `packages/core/src/utils/free-to-spend.ts`, with tests in `packages/core/src/utils/free-to-spend.test.ts`. It currently calculates liquid balance from active opening balances and transactions through `asOf`, then applies remaining recurring income, bills due today or later, the full monthly investment, and safety reserve. Calendar calculations use UTC.
+The pure calculation engine is in `packages/core/src/utils/free-to-spend.ts`, with tests in `packages/core/src/utils/free-to-spend.test.ts`. It calculates liquid balance from effective active opening balances and eligible transactions through `asOf`, then applies remaining recurring income, bills due today or later, the full monthly investment, and safety reserve. Calendar calculations use UTC. See the latest balance-date slice below for the implemented history boundary and the still-pending settlement policies.
 
 ## Working Tree
 
@@ -42,7 +42,7 @@ The shared import inbox is available at `/imports`. `import_sources` stores user
 
 Authenticated source intake uses the web session, not a browser-supplied user ID. The unique `(user_id, source_type, source_event_key)` key and transactionally created single candidate make exact retries concurrency-safe. Reusing the same key with changed source/candidate data returns `409`; different event keys remain separate even for equal amount/date. There is deliberately no fuzzy or cross-source duplicate linking yet, so one purchase received through separate channels may still appear twice.
 
-The inbox supports correcting amount, direction, date, description, and account, and rejecting with an optional reason. Posting is not available: `POST /api/import-candidates/{id}/approve` returns `409`, and the database constraint prevents changing the posting state. Before enabling it, decide the opening-balance effective-date policy and how settled/partial recurring obligations reconcile with forecasts. Card accounting remains out of scope.
+The inbox supports correcting amount, direction, date, description, and account, and rejecting with an optional reason. Posting is not available: `POST /api/import-candidates/{id}/approve` returns `409`, and the database constraint prevents changing the posting state. The policies are now approved below, but settlement/reconciliation and atomic approval must still be implemented before posting can be enabled. Card accounting remains out of scope.
 
 No Android capture/device authentication, PDF upload, OCR, local AI extraction, or transaction posting was added. The endpoint accepts authenticated source events only; it is a foundation, not an ingestion implementation. Synthetic API checks covered parallel retries, distinct equal-value events, changed-payload conflicts, user/account isolation, correction, repeat rejection, and the posting block. The authenticated inbox was visually checked with synthetic data. Migration `0001_magical_shiva` was applied to the local PostgreSQL container.
 
@@ -52,6 +52,82 @@ No Android capture/device authentication, PDF upload, OCR, local AI extraction, 
 - The previous `pnpm --filter @centwise/core run lint` failed because ESLint 9 could not find `eslint.config.*`; this is a workspace lint configuration issue, not a reported source lint finding. Do not expand scope to repair lint configuration unless needed and explicitly agreed.
 - Use the repository workflow in `AGENTS.md`: one implementation owner, read-only review/validation agents, and commit only the validated slice. Do not push.
 
+## Opening-Balance Date Slice (latest)
+
+The user explicitly chose to implement only the opening-balance date/history slice in this session,
+not the larger reconciliation/approval slice. Import posting MUST remain blocked in the API and database.
+No prior records were deleted, despite permission to discard development fixtures.
+
+### Approved financial policies
+
+- An account's opening balance is cash at the **start of its selected UTC calendar day (00:00 UTC)**.
+  Earlier movements remain visible history and do not change cash. Movements exactly at midnight count.
+- Existing accounts retain a null effective date and the legacy calculation until the owner explicitly
+  confirms both balance and date. Never infer the date from account creation or silently backfill it.
+- Future settlement: explicitly link payments/receipts to a monthly occurrence, never by amount/date alone.
+  Partial payments leave the remainder outstanding; overpayments affect actual cash once and cannot produce
+  a negative outstanding amount. Settling for less requires explicit confirmation, not a change to future rules.
+- Editing a linked payment must atomically recalculate the remainder; deletion reopens the obligation.
+  Changes to account/direction/month require explicit reconciliation. Exceptional short-payment settlement
+  must be reviewed after changes. Editing/deactivating a rule must not erase reconciled occurrences.
+- Unsettled expenses remain reserved after their due date and across month boundaries until settled or
+  explicitly cancelled. Overdue unreceived income is not spendable unless received or rescheduled.
+
+Only the first two policies are implemented here. **Recurring settlement, persisted occurrences,
+overdue carry-forward, cross-source reconciliation and atomic approval are NOT implemented.**
+The engine still uses its existing recurring-date forecast behavior; do not describe the approved
+future policies as current functionality.
+
+### Implemented surfaces and limits
+
+- Nullable PostgreSQL `accounts.opening_balance_date` (`date`, string in Drizzle); new account creation
+  and onboarding require `openingBalanceDate` in `YYYY-MM-DD` form. Account updates must send the balance
+  and effective date together; name/active-state-only legacy updates remain valid.
+- The engine excludes pre-boundary movements, future transactions and balances not yet effective.
+  Null/omitted dates preserve legacy calculation. Accounts retain independent boundaries.
+- Onboarding, initial-account creation and per-account balance confirmation explain UTC start-of-day.
+  Activity labels historical-only transactions. The dashboard cash summary uses the server calculation,
+  not a second client calculation that would re-add historical transactions.
+- Sources/candidates remain review-only. No approved historical imports, financial posting, card accounting,
+  internal transfers, Android capture, PDF/OCR/AI, recurrence prediction or currency conversion was added.
+- Synthetic HTTP regression tests are opt-in with `CENTWISE_TEST_BASE_URL`; they leave isolated synthetic
+  users/accounts/candidates in the development database, delete their test transactions and use no real data.
+
+### Validation and delivery
+
+- Generated/applied Drizzle migration `0002_demonic_brood` to the healthy local PostgreSQL container.
+  Verified `opening_balance_date` is nullable `date`; all 7 accounts present before migration retained
+  null dates. No existing records were deleted or backfilled.
+- 26 focused unit tests passed across calculation, financial schemas, transaction schemas and import
+  schemas. Coverage includes exact UTC midnight, timezone offsets, year/month/leap-day boundaries,
+  separate account dates, inactive/future accounts, negative balances, reserves, legacy null dates,
+  transaction edits/deletions and balance/date paired validation.
+- The synthetic HTTP integration passed (1 test): account creation/onboarding, ownership from session,
+  foreign account rejection, historical transaction retention, cash recalculation, concurrent source retries,
+  distinct equal-value events, changed-payload conflicts and repeated/concurrent blocked approvals.
+  There are still **zero financial postings from approval**; this is a block regression, not posting support.
+- `pnpm typecheck` passed (5 tasks). The first validation found a stale response-variable reference and
+  Node-only HTTP tests inside the platform-neutral TypeScript compilation; both were fixed and revalidated.
+  HTTP integration uses `.test.mjs` without changing the core runtime/type dependencies.
+- A direct SQL attempt to set a synthetic candidate's posting status to `posted` failed with
+  `import_candidates_posting_blocked_check`; rollback succeeded. All 3 HTTP-test candidates remained
+  blocked and none approved. Existing synthetic development data, including fixtures from interrupted
+  test runs and manual visual checks, may remain locally.
+- Automated browser checks hit an unsupported cookie protocol operation and an unstable click;
+  automation stopped after two failures. The user then explicitly confirmed manual visual validation at
+  `http://localhost:3001`: UTC date/explanation, balance confirmation, historical-only label/no cash impact,
+  same-day cash impact and the disabled inbox. No real data or credentials were requested.
+
+To repeat the focused tests with a migrated local web server running:
+
+```powershell
+$env:CENTWISE_TEST_BASE_URL = "http://localhost:3001"
+pnpm --filter @centwise/core exec vitest run src/utils/free-to-spend.test.ts src/schemas/financial.test.ts src/schemas/transaction.test.ts src/schemas/import-candidate.test.ts src/integration/opening-balance.test.mjs
+pnpm typecheck
+```
+
+Without `CENTWISE_TEST_BASE_URL`, the HTTP integration is explicitly skipped; unit tests still run.
+
 ## Prompt For The Next Session
 
-Continue in `c:\projects\centwise`. Read `AGENTS.md`, this handoff, and [the import automation plan](./IMPORT-AUTOMATION-PLAN.md), then inspect the current branch and working tree. Phase 4, inline entry editing, and the import inbox/idempotency foundation are complete; do not redo them. Before implementing any posting path, ask for decisions on opening-balance effective dates and recurring-obligation settlement/reconciliation. Android capture, PDF upload/OCR/AI, cross-source duplicate linking, and card accounting remain unimplemented. Implement one slice per session; do not push.
+Continue in `c:\projects\centwise`. Read `AGENTS.md`, this handoff, and [the import automation plan](./IMPORT-AUTOMATION-PLAN.md), then inspect the branch, status and recent commits. The opening-balance and settlement policies above were explicitly approved; do not ask for those same decisions again. The opening-balance date slice is implemented; preserve nullable legacy dates and require explicit balance/date confirmation. Next, implement one bounded slice of persisted monthly occurrences and explicit settlement links, including partial payments, edits/deletions and overdue carry-forward under the approved policies. Keep import approval blocked until financial reconciliation, cross-source ambiguity handling and transactional/concurrent posting are verified end-to-end. Android, PDF/OCR/AI, recurrence prediction, card posting, suspicious internal transfers and currency conversion remain out of scope. Use only synthetic data, one implementation owner, focused validation and `pnpm typecheck`; apply migrations locally and commit only the validated slice without pushing.

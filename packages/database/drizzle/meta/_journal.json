@@ -15,6 +15,13 @@
       "when": 1793771579758,
       "tag": "0001_magical_shiva",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793783517653,
+      "tag": "0002_demonic_brood",
+      "breakpoints": true
     }
   ]
 }

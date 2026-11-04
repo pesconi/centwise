@@ -1,5 +1,6 @@
 "use client";
 
+import { importPostingBlockers } from "@centwise/core";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FormEvent, useState } from "react";
 
@@ -283,15 +284,12 @@ export function ImportInbox() {
             <section className="mb-8 border-l-4 border-clay bg-white p-5 shadow-[0_20px_50px_-32px_rgba(23,33,29,0.45)]">
               <h2 className="font-semibold">Posting is disabled</h2>
               <p className="mt-1 text-sm text-ink/70">
-                Imported candidates cannot create transactions until financial
-                history and settlement rules are agreed.
+                Balance-date and settlement policies are decided. Imported candidates
+                still cannot create transactions until reconciliation and atomic approval are implemented.
               </p>
               <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-ink/70">
                 {(
-                  candidatesQuery.data?.postingBlockers ?? [
-                    "Opening-balance effective-date policy has not been decided.",
-                    "Recurring obligation settlement and reconciliation have not been implemented.",
-                  ]
+                  candidatesQuery.data?.postingBlockers ?? importPostingBlockers
                 ).map((blocker) => (
                   <li key={blocker}>{blocker}</li>
                 ))}

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 
 import { importCandidateCreateSchema } from "@centwise/core";
 import type { ImportCandidateCreateInput } from "@centwise/core";
-import { getImportCandidateValidationIssues } from "@centwise/core";
+import { getImportCandidateValidationIssues, importPostingBlockers } from "@centwise/core";
 import { db, schema } from "@centwise/database";
 import { and, desc, eq } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
@@ -10,11 +10,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSessionUserId } from "@/server/auth";
 
 export const dynamic = "force-dynamic";
-
-const postingBlockers = [
-  "Opening-balance effective-date policy has not been decided.",
-  "Recurring obligation settlement and reconciliation have not been implemented.",
-];
 
 class ActiveAccountNotFoundError extends Error {}
 
@@ -103,7 +98,7 @@ export async function GET(): Promise<NextResponse> {
       account,
     })),
     postingBlocked: true,
-    postingBlockers,
+    postingBlockers: importPostingBlockers,
   });
 }
 
@@ -288,7 +283,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   return NextResponse.json(
-    { candidate: result.candidate, postingBlocked: true, postingBlockers },
+    { candidate: result.candidate, postingBlocked: true, postingBlockers: importPostingBlockers },
     { status: result.created ? 201 : 200 },
   );
 }

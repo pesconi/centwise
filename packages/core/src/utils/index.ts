@@ -1,6 +1,6 @@
 export { formatCurrency } from "./currency";
-export { calculateFreeToSpend } from "./free-to-spend";
-export { getImportCandidateValidationIssues } from "./import-candidate";
+export { calculateFreeToSpend, isHistoricalTransaction } from "./free-to-spend";
+export { getImportCandidateValidationIssues, importPostingBlockers } from "./import-candidate";
 export type { ImportCandidateReviewFields } from "./import-candidate";
 export type {
 	FreeToSpendAccount,

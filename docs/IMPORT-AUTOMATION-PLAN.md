@@ -19,7 +19,8 @@ Status: reviewed-inbox foundation implemented; capture and document ingestion re
 - Existing transactions require an owned account. Recurring bills/income are forecasts, not payment records.
 - The spending engine deducts remaining recurring bills independently of recorded transactions. Imported payments must not cause both a transaction deduction and the same forecast deduction.
 - No document storage, background worker, or reconciliation model exists yet.
-- Existing opening balances have no effective-date boundary. Historical imports must not be added on top of a balance that already includes them.
+- New accounts have an explicit start-of-day UTC opening-balance boundary; legacy accounts retain a null
+  date until balance/date confirmation. Pre-boundary movements are history only, never additional cash.
 - The web inbox now persists authenticated source events and review candidates with exact-event retry idempotency. It does not ingest Android messages or documents.
 
 ## Target flow
@@ -64,9 +65,32 @@ remain separate; settled obligations are counted once; pre-balance history does 
 
 Foundation delivered: identical concurrent source-event retries create one candidate; reusing the event
 key with a changed payload conflicts; a different key is never merged based on amount/date. Candidate
-correction and rejection are available. Posting remains blocked in both the API and database until the
-opening-balance effective-date and recurring-obligation reconciliation decisions are resolved. Cross-source
+correction and rejection are available. Posting remains blocked in both the API and database until
+recurring-obligation reconciliation and atomic approval are implemented. The balance-date and settlement
+policies are now approved (see below); the opening-balance boundary is implemented. Cross-source
 duplicate linking, failed extraction records, and approval/posting are not implemented.
+
+### Approved policy and current slice
+
+- Opening balance means the start of the selected date, at **00:00 UTC**. Earlier movements remain
+  visible history with no cash impact; movements on that date count. Each account has its own date.
+  A future effective balance does not count before its date. Never infer legacy dates: null dates
+  preserve old calculations until explicit confirmation of both balance and date.
+- Explicit monthly-occurrence links will reconcile both expenses and income. Part-payments leave
+  only the unpaid remainder; overpayments do not create negative outstanding forecasts. Settling
+  for less requires an explicit decision and does not rewrite the recurring rule.
+- Linked payment edits must recalculate atomically, deletions reopen the obligation, and changes of
+  account/direction/month require explicit reconciliation. Revisit exceptional short-payment settlement
+  after edits. Rule edits/deactivation must not erase already reconciled occurrences.
+- Unpaid expenses remain reserved after the due date and across months until settled/cancelled.
+  Overdue unreceived income is not added to spendable cash unless received or rescheduled.
+
+The user chose **only balance dates and historical cash exclusion** for this session. Settlement links,
+monthly occurrence persistence and overdue carry-forward remain pending; the current recurring forecast
+calculation has not changed. The API and database continue to block ALL candidate posting, even for
+historical, apparently unique or fully reviewed candidates. Cross-source/manual collisions cannot yet be
+resolved; never merge or approve them based only on equal value/date. Card and suspicious internal-transfer
+posting remain blocked. No development data was wiped.
 
 ## 2. Android capture
 
@@ -133,8 +157,8 @@ or explicit review/failure states, never silent financial postings.
 
 ## Delivery order and validation
 
-1. Resolve balance-date and settlement policy before enabling posting; extend the delivered inbox with
-   cross-source reconciliation and atomic posting only after those decisions.
+1. Apply the approved balance-date and settlement policy. The balance-date slice is implemented; next add
+   persisted occurrences and explicit settlement, then cross-source reconciliation and atomic posting.
 2. Mobile authentication and one known bank's SMS format, then notification capture and offline sync.
 3. PDF upload, local extraction/OCR/AI, and inbox preview; card posting remains gated.
 4. Recurrence suggestions and only then opt-in automation.
@@ -151,13 +175,13 @@ Apply generated migrations to local PostgreSQL before committing schema changes.
 ## Decisions needed before enabling posting or later integrations
 
 - First bank application/sender and synthetic examples of its message formats.
-- Account effective-date semantics and card/transfer accounting behavior.
+- Card/transfer accounting behavior (balance-date and settlement semantics are approved above).
 - Android device/version and backend connectivity while away from home.
 - Server RAM/CPU/GPU for local OCR/model selection and extraction throughput.
 - Explicit upload limits and retention periods.
 
-Recommended next session: make the opening-balance effective-date and recurring-obligation
-settlement/reconciliation decisions before implementing any imported financial posting.
+Recommended next session: implement a bounded persisted-occurrence/settlement slice under the approved
+policies, preserving the posting block until reconciliation and atomic approval are fully verified.
 
 ## Platform references
 
