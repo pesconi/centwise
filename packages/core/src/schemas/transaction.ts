@@ -9,4 +9,8 @@ export const transactionSchema = z.object({
     description: z.string().trim().max(500).nullable().optional()
 });
 
+export const transactionUpdateSchema = transactionSchema.partial()
+    .refine((value) => Object.keys(value).length > 0, "At least one transaction field is required.");
+
 export type CreateTransactionInput = z.infer<typeof transactionSchema>;
+export type TransactionUpdateInput = z.infer<typeof transactionUpdateSchema>;

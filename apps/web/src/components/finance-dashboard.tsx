@@ -42,6 +42,7 @@ interface ScheduledItem {
     name: string;
     type: "income" | "bill";
     amountInCents: number;
+    dayOfMonth: number;
     date: string;
 }
 
@@ -86,6 +87,10 @@ export function FinanceDashboard() {
     const [incomeDrafts, setIncomeDrafts] = useState<PlanEntryDraft[]>([]);
     const [billDrafts, setBillDrafts] = useState<PlanEntryDraft[]>([]);
     const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
+    const [editingTransactionId, setEditingTransactionId] = useState<string | null>(null);
+    const [editingScheduledItem, setEditingScheduledItem] = useState<{ id: string; type: ScheduledItem["type"] } | null>(null);
+    const [transactionEditError, setTransactionEditError] = useState<string | null>(null);
+    const [scheduledItemEditError, setScheduledItemEditError] = useState<string | null>(null);
 
     const sessionQuery = useQuery({
         queryKey: ["session"],
@@ -211,6 +216,48 @@ export function FinanceDashboard() {
         }
     });
 
+    const updateTransactionMutation = useMutation({
+        mutationFn: ({ transactionId, updates }: {
+            transactionId: string;
+            updates: Pick<Transaction, "amountInCents" | "type" | "occurredAt" | "description">;
+        }) => requestJson<{ transaction: Transaction }>(`/api/transactions?transactionId=${transactionId}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(updates)
+        }),
+        onSuccess: async () => {
+            setEditingTransactionId(null);
+            setTransactionEditError(null);
+            await Promise.all([
+                queryClient.invalidateQueries({ queryKey: ["transactions"] }),
+                queryClient.invalidateQueries({ queryKey: ["free-to-spend"] })
+            ]);
+        }
+    });
+
+    const updateScheduledItemMutation = useMutation({
+        mutationFn: ({ item, name, amountInCents, dayOfMonth }: {
+            item: ScheduledItem;
+            name: string;
+            amountInCents: number;
+            dayOfMonth: number;
+        }) => requestJson<{ bill?: unknown; income?: unknown }>(
+            `/api/recurring-${item.type === "bill" ? "bills" : "incomes"}/${item.id}`,
+            {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(item.type === "bill"
+                    ? { name, amountInCents, dueDayOfMonth: dayOfMonth }
+                    : { name, amountInCents, expectedDayOfMonth: dayOfMonth })
+            }
+        ),
+        onSuccess: async () => {
+            setEditingScheduledItem(null);
+            setScheduledItemEditError(null);
+            await queryClient.invalidateQueries({ queryKey: ["free-to-spend"] });
+        }
+    });
+
     const deleteTransactionMutation = useMutation({
         mutationFn: ({ transactionId }: { transactionId: string }) =>
             requestJson<{ transaction: Transaction }>(`/api/transactions?transactionId=${transactionId}`, {
@@ -262,6 +309,62 @@ export function FinanceDashboard() {
             },
             { onSuccess: () => form.reset() }
         );
+    }
+
+    function handleTransactionEditSubmit(event: FormEvent<HTMLFormElement>, transactionId: string) {
+        event.preventDefault();
+        setTransactionEditError(null);
+        updateTransactionMutation.reset();
+
+        const formData = new FormData(event.currentTarget);
+        const amountInCents = Math.round(Number(formData.get("amount")) * 100);
+        const date = String(formData.get("occurredAt"));
+        const occurredAt = new Date(`${date}T00:00:00.000Z`);
+        const type = String(formData.get("type"));
+
+        if (!Number.isSafeInteger(amountInCents) || amountInCents <= 0) {
+            setTransactionEditError("Enter an amount greater than zero.");
+            return;
+        }
+
+        if (!date || Number.isNaN(occurredAt.getTime())) {
+            setTransactionEditError("Enter a valid date.");
+            return;
+        }
+
+        if (type !== "income" && type !== "expense") {
+            setTransactionEditError("Choose income or expense.");
+            return;
+        }
+
+        updateTransactionMutation.mutate({
+            transactionId,
+            updates: {
+                amountInCents,
+                type,
+                occurredAt: occurredAt.toISOString(),
+                description: String(formData.get("description")).trim() || null
+            }
+        });
+    }
+
+    function handleScheduledItemEditSubmit(event: FormEvent<HTMLFormElement>, item: ScheduledItem) {
+        event.preventDefault();
+        setScheduledItemEditError(null);
+        updateScheduledItemMutation.reset();
+
+        const formData = new FormData(event.currentTarget);
+        const name = String(formData.get("name")).trim();
+        const amountInCents = Math.round(Number(formData.get("amount")) * 100);
+        const dayOfMonth = Number(formData.get("dayOfMonth"));
+
+        if (!name || name.length > 100 || !Number.isSafeInteger(amountInCents) || amountInCents <= 0
+            || !Number.isInteger(dayOfMonth) || dayOfMonth < 1 || dayOfMonth > 31) {
+            setScheduledItemEditError("Enter a name, positive amount, and day from 1 to 31.");
+            return;
+        }
+
+        updateScheduledItemMutation.mutate({ item, name, amountInCents, dayOfMonth });
     }
 
     function handleAccountSubmit(event: FormEvent<HTMLFormElement>) {
@@ -621,14 +724,50 @@ export function FinanceDashboard() {
                                     {scheduledItems.length > 0 ? (
                                         <ul className="mt-3 divide-y divide-ink/10">
                                             {scheduledItems.map((item) => (
-                                                <li className="flex items-center justify-between gap-4 py-3" key={`${item.type}-${item.id}`}>
-                                                    <div className="min-w-0">
-                                                        <p className="truncate font-medium">{item.name}</p>
-                                                        <p className="text-sm text-ink/55">{item.type === "income" ? "Income" : "Bill"} - {formatPlanDate(item.date)}</p>
+                                                <li className="border-b border-ink/10 py-3 last:border-0" key={`${item.type}-${item.id}`}>
+                                                    <div className="flex items-center justify-between gap-4">
+                                                        <div className="min-w-0">
+                                                            <p className="truncate font-medium">{item.name}</p>
+                                                            <p className="text-sm text-ink/55">{item.type === "income" ? "Income" : "Bill"} - {formatPlanDate(item.date)}</p>
+                                                        </div>
+                                                        <div className="flex shrink-0 items-center gap-3">
+                                                            <p className={`font-semibold ${item.type === "income" ? "text-spruce" : "text-ink"}`}>
+                                                                {item.type === "income" ? "+" : "-"}{formatCurrency(item.amountInCents, "EUR")}
+                                                            </p>
+                                                            <button
+                                                                className="text-sm font-semibold text-spruce underline underline-offset-4"
+                                                                onClick={() => {
+                                                                    setEditingScheduledItem({ id: item.id, type: item.type });
+                                                                    setScheduledItemEditError(null);
+                                                                    updateScheduledItemMutation.reset();
+                                                                }}
+                                                                type="button"
+                                                            >
+                                                                Edit
+                                                            </button>
+                                                        </div>
                                                     </div>
-                                                    <p className={`shrink-0 font-semibold ${item.type === "income" ? "text-spruce" : "text-ink"}`}>
-                                                        {item.type === "income" ? "+" : "-"}{formatCurrency(item.amountInCents, "EUR")}
-                                                    </p>
+                                                    {editingScheduledItem?.id === item.id && editingScheduledItem.type === item.type ? (
+                                                        <form className="mt-4 grid gap-3 border-l-2 border-spruce/30 pl-4 sm:grid-cols-3" onSubmit={(event) => handleScheduledItemEditSubmit(event, item)}>
+                                                            <label className="grid gap-1 text-sm font-semibold">Name
+                                                                <input className="h-10 border border-ink/20 bg-white px-3 outline-none ring-spruce focus:ring-2" defaultValue={item.name} maxLength={100} name="name" required />
+                                                            </label>
+                                                            <label className="grid gap-1 text-sm font-semibold">Amount (EUR)
+                                                                <input className="h-10 border border-ink/20 bg-white px-3 outline-none ring-spruce focus:ring-2" defaultValue={(item.amountInCents / 100).toFixed(2)} min="0.01" name="amount" required step="0.01" type="number" />
+                                                            </label>
+                                                            <label className="grid gap-1 text-sm font-semibold">{item.type === "bill" ? "Due day" : "Expected day"}
+                                                                <input className="h-10 border border-ink/20 bg-white px-3 outline-none ring-spruce focus:ring-2" defaultValue={item.dayOfMonth} max="31" min="1" name="dayOfMonth" required type="number" />
+                                                            </label>
+                                                            <div className="flex items-center gap-4 sm:col-span-3">
+                                                                <button className="h-10 bg-spruce px-4 text-sm font-semibold text-white disabled:opacity-60" disabled={updateScheduledItemMutation.isPending} type="submit">
+                                                                    {updateScheduledItemMutation.isPending ? "Saving..." : "Save changes"}
+                                                                </button>
+                                                                <button className="text-sm font-semibold text-ink/60 underline underline-offset-4" onClick={() => setEditingScheduledItem(null)} type="button">Cancel</button>
+                                                            </div>
+                                                            {scheduledItemEditError ? <p className="text-sm text-red-700 sm:col-span-3">{scheduledItemEditError}</p> : null}
+                                                            {updateScheduledItemMutation.isError ? <p className="text-sm text-red-700 sm:col-span-3">{updateScheduledItemMutation.error.message}</p> : null}
+                                                        </form>
+                                                    ) : null}
                                                 </li>
                                             ))}
                                         </ul>
@@ -654,15 +793,55 @@ export function FinanceDashboard() {
                                 {!transactionsQuery.isLoading && !transactionsQuery.isError && transactions.length === 0 ? <p className="py-10 text-center text-ink/60">Your recorded activity will appear here.</p> : null}
                                 <ul className="divide-y divide-ink/10">
                                     {transactions.map((transaction) => (
-                                        <li className="flex items-center justify-between gap-4 py-4" key={transaction.id}>
-                                            <div className="min-w-0">
-                                                <p className="truncate font-semibold">{transaction.description ?? "Untitled transaction"}</p>
-                                                <p className="mt-1 text-sm text-ink/55">{new Date(transaction.occurredAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</p>
+                                        <li className="py-4" key={transaction.id}>
+                                            <div className="flex items-center justify-between gap-4">
+                                                <div className="min-w-0">
+                                                    <p className="truncate font-semibold">{transaction.description ?? "Untitled transaction"}</p>
+                                                    <p className="mt-1 text-sm text-ink/55">{new Date(transaction.occurredAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</p>
+                                                </div>
+                                                <div className="flex shrink-0 items-center gap-3">
+                                                    <p className={`font-semibold ${transaction.type === "expense" ? "text-red-700" : "text-spruce"}`}>{transaction.type === "expense" ? "-" : "+"}{formatCurrency(transaction.amountInCents, transaction.currency)}</p>
+                                                    <button
+                                                        className="text-sm font-semibold text-spruce underline underline-offset-4"
+                                                        onClick={() => {
+                                                            setEditingTransactionId(transaction.id);
+                                                            setTransactionEditError(null);
+                                                            updateTransactionMutation.reset();
+                                                        }}
+                                                        type="button"
+                                                    >
+                                                        Edit
+                                                    </button>
+                                                    <button aria-label={`Remove ${transaction.description ?? "transaction"}`} className="text-sm font-semibold text-ink/50 underline underline-offset-4 transition hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-50" disabled={deleteTransactionMutation.isPending} onClick={() => handleTransactionDelete(transaction.id)} type="button">Remove</button>
+                                                </div>
                                             </div>
-                                            <div className="flex shrink-0 items-center gap-3">
-                                                <p className={`font-semibold ${transaction.type === "expense" ? "text-red-700" : "text-spruce"}`}>{transaction.type === "expense" ? "-" : "+"}{formatCurrency(transaction.amountInCents, transaction.currency)}</p>
-                                                <button aria-label={`Remove ${transaction.description ?? "transaction"}`} className="text-sm font-semibold text-ink/50 underline underline-offset-4 transition hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-50" disabled={deleteTransactionMutation.isPending} onClick={() => handleTransactionDelete(transaction.id)} type="button">Remove</button>
-                                            </div>
+                                            {editingTransactionId === transaction.id ? (
+                                                <form className="mt-4 grid gap-3 border-l-2 border-spruce/30 pl-4 sm:grid-cols-2" onSubmit={(event) => handleTransactionEditSubmit(event, transaction.id)}>
+                                                    <label className="grid gap-1 text-sm font-semibold">Description
+                                                        <input className="h-10 border border-ink/20 bg-white px-3 outline-none ring-spruce focus:ring-2" defaultValue={transaction.description ?? ""} maxLength={500} name="description" />
+                                                    </label>
+                                                    <label className="grid gap-1 text-sm font-semibold">Amount (EUR)
+                                                        <input className="h-10 border border-ink/20 bg-white px-3 outline-none ring-spruce focus:ring-2" defaultValue={(transaction.amountInCents / 100).toFixed(2)} min="0.01" name="amount" required step="0.01" type="number" />
+                                                    </label>
+                                                    <label className="grid gap-1 text-sm font-semibold">Type
+                                                        <select className="h-10 border border-ink/20 bg-white px-3 outline-none ring-spruce focus:ring-2" defaultValue={transaction.type} name="type">
+                                                            <option value="expense">Expense</option>
+                                                            <option value="income">Income</option>
+                                                        </select>
+                                                    </label>
+                                                    <label className="grid gap-1 text-sm font-semibold">Date
+                                                        <input className="h-10 border border-ink/20 bg-white px-3 outline-none ring-spruce focus:ring-2" defaultValue={transaction.occurredAt.slice(0, 10)} name="occurredAt" required type="date" />
+                                                    </label>
+                                                    <div className="flex items-center gap-4 sm:col-span-2">
+                                                        <button className="h-10 bg-spruce px-4 text-sm font-semibold text-white disabled:opacity-60" disabled={updateTransactionMutation.isPending} type="submit">
+                                                            {updateTransactionMutation.isPending ? "Saving..." : "Save changes"}
+                                                        </button>
+                                                        <button className="text-sm font-semibold text-ink/60 underline underline-offset-4" onClick={() => setEditingTransactionId(null)} type="button">Cancel</button>
+                                                    </div>
+                                                    {transactionEditError ? <p className="text-sm text-red-700 sm:col-span-2">{transactionEditError}</p> : null}
+                                                    {updateTransactionMutation.isError ? <p className="text-sm text-red-700 sm:col-span-2">{updateTransactionMutation.error.message}</p> : null}
+                                                </form>
+                                            ) : null}
                                         </li>
                                     ))}
                                 </ul>

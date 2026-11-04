@@ -59,6 +59,7 @@ export async function GET(): Promise<NextResponse> {
                 name: income.name,
                 type: "income" as const,
                 amountInCents: income.amountInCents,
+                dayOfMonth: income.expectedDayOfMonth,
                 date: getOccurrenceDate(asOf, income.expectedDayOfMonth, lastDayOfMonth)
             })),
         ...recurringBills
@@ -68,6 +69,7 @@ export async function GET(): Promise<NextResponse> {
                 name: bill.name,
                 type: "bill" as const,
                 amountInCents: bill.amountInCents,
+                dayOfMonth: bill.dueDayOfMonth,
                 date: getOccurrenceDate(asOf, bill.dueDayOfMonth, lastDayOfMonth)
             }))
     ].sort((first, second) => first.date.localeCompare(second.date));

@@ -32,6 +32,10 @@ Focused calculation tests cover the end of February, a new month, and negative f
 
 Do not start mobile parity, transaction classification, household features, or bank integrations without an explicit product decision.
 
+## Entry Editing
+
+The dashboard supports inline edits for upcoming recurring income/bills and recorded transactions. Recurring edits use the existing user-owned update endpoints; transaction edits use the user-owned `PUT /api/transactions` endpoint and refresh the activity and free-to-spend queries. No database migration is needed. The transaction update schema has focused tests; rerun the core tests and `pnpm typecheck` after further changes. Authenticated visual verification still requires a local test account.
+
 ## Validation and Delivery
 
 - Run focused calculation tests and `pnpm typecheck` before completing the slice.
@@ -40,4 +44,4 @@ Do not start mobile parity, transaction classification, household features, or b
 
 ## Prompt For The Next Session
 
-Continue in `c:\projects\centwise`. Read `AGENTS.md` and this handoff, then inspect the current branch and working tree. Phase 4 is complete; do not redo it. Confirm the next product slice before implementation rather than assuming mobile parity, transaction classification, household features, or bank integrations. Do not push.
+Continue in `c:\projects\centwise`. Read `AGENTS.md` and this handoff, then inspect the current branch and working tree. Phase 4 and inline entry editing are complete; do not redo them. Confirm the next product slice before implementation rather than assuming mobile parity, transaction classification, household features, or bank integrations. Do not push.
