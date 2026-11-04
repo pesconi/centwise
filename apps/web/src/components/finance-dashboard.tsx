@@ -492,6 +492,7 @@ export function FinanceDashboard() {
                     {user ? (
                         <div className="flex items-center gap-3 text-sm text-ink/65">
                             <span>{user.email}</span>
+                            <a className="font-semibold text-spruce underline underline-offset-4" href="/imports">Import inbox</a>
                             <button className="font-semibold text-spruce underline underline-offset-4" disabled={logoutMutation.isPending} onClick={() => logoutMutation.mutate()} type="button">
                                 Sign out
                             </button>

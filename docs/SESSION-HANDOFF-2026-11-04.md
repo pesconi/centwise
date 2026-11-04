@@ -36,12 +36,22 @@ Do not start mobile parity, transaction classification, household features, or b
 
 The dashboard supports inline edits for upcoming recurring income/bills and recorded transactions. Recurring edits use the existing user-owned update endpoints; transaction edits use the user-owned `PUT /api/transactions` endpoint and refresh the activity and free-to-spend queries. No database migration is needed. The transaction update schema has focused tests; rerun the core tests and `pnpm typecheck` after further changes. Authenticated visual verification still requires a local test account.
 
+## Import Inbox Foundation
+
+The shared import inbox is available at `/imports`. `import_sources` stores user-owned source type, stable event key, capture time, parser version, payload fingerprint, and structured evidence. `import_candidates` stores the proposed EUR transaction fields, explicit review/validation state, rejection decision, provenance link, and a database-enforced `posting_status = blocked`.
+
+Authenticated source intake uses the web session, not a browser-supplied user ID. The unique `(user_id, source_type, source_event_key)` key and transactionally created single candidate make exact retries concurrency-safe. Reusing the same key with changed source/candidate data returns `409`; different event keys remain separate even for equal amount/date. There is deliberately no fuzzy or cross-source duplicate linking yet, so one purchase received through separate channels may still appear twice.
+
+The inbox supports correcting amount, direction, date, description, and account, and rejecting with an optional reason. Posting is not available: `POST /api/import-candidates/{id}/approve` returns `409`, and the database constraint prevents changing the posting state. Before enabling it, decide the opening-balance effective-date policy and how settled/partial recurring obligations reconcile with forecasts. Card accounting remains out of scope.
+
+No Android capture/device authentication, PDF upload, OCR, local AI extraction, or transaction posting was added. The endpoint accepts authenticated source events only; it is a foundation, not an ingestion implementation. Synthetic API checks covered parallel retries, distinct equal-value events, changed-payload conflicts, user/account isolation, correction, repeat rejection, and the posting block. The authenticated inbox was visually checked with synthetic data. Migration `0001_magical_shiva` was applied to the local PostgreSQL container.
+
 ## Validation and Delivery
 
-- Run focused calculation tests and `pnpm typecheck` before completing the slice.
+- Run focused import-schema tests and `pnpm typecheck` before completing the slice.
 - The previous `pnpm --filter @centwise/core run lint` failed because ESLint 9 could not find `eslint.config.*`; this is a workspace lint configuration issue, not a reported source lint finding. Do not expand scope to repair lint configuration unless needed and explicitly agreed.
 - Use the repository workflow in `AGENTS.md`: one implementation owner, read-only review/validation agents, and commit only the validated slice. Do not push.
 
 ## Prompt For The Next Session
 
-Continue in `c:\projects\centwise`. Read `AGENTS.md`, this handoff, and [the import automation plan](./IMPORT-AUTOMATION-PLAN.md), then inspect the current branch and working tree. Phase 4 and inline entry editing are complete; do not redo them. The next planned product work is reviewed bank-message/PDF import: Android APK, both SMS and bank notifications, with local AI for PDFs. Only planning has been done. Start with the shared inbox/idempotency foundation; resolve balance effective dates, settlement reconciliation, and card accounting before imported postings. Implement one slice per session; do not push.
+Continue in `c:\projects\centwise`. Read `AGENTS.md`, this handoff, and [the import automation plan](./IMPORT-AUTOMATION-PLAN.md), then inspect the current branch and working tree. Phase 4, inline entry editing, and the import inbox/idempotency foundation are complete; do not redo them. Before implementing any posting path, ask for decisions on opening-balance effective dates and recurring-obligation settlement/reconciliation. Android capture, PDF upload/OCR/AI, cross-source duplicate linking, and card accounting remain unimplemented. Implement one slice per session; do not push.

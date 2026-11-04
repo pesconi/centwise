@@ -1,7 +1,7 @@
 # Bank message and PDF import plan
 
 Date: 2026-11-04
-Status: planned; no ingestion implementation yet.
+Status: reviewed-inbox foundation implemented; capture and document ingestion remain planned.
 
 ## Confirmed scope
 
@@ -18,8 +18,9 @@ Status: planned; no ingestion implementation yet.
 - Web authentication uses an HTTP-only session cookie; mobile needs a deliberately implemented authenticated session and device lifecycle.
 - Existing transactions require an owned account. Recurring bills/income are forecasts, not payment records.
 - The spending engine deducts remaining recurring bills independently of recorded transactions. Imported payments must not cause both a transaction deduction and the same forecast deduction.
-- No import inbox, source provenance, document storage, background worker, or reconciliation model exists yet.
+- No document storage, background worker, or reconciliation model exists yet.
 - Existing opening balances have no effective-date boundary. Historical imports must not be added on top of a balance that already includes them.
+- The web inbox now persists authenticated source events and review candidates with exact-event retry idempotency. It does not ingest Android messages or documents.
 
 ## Target flow
 
@@ -60,6 +61,12 @@ but not automatic financial postings. Apply the same review restriction to suspe
 
 Acceptance: identical retry/concurrent approval creates exactly one posting; equal independent purchases
 remain separate; settled obligations are counted once; pre-balance history does not change current cash.
+
+Foundation delivered: identical concurrent source-event retries create one candidate; reusing the event
+key with a changed payload conflicts; a different key is never merged based on amount/date. Candidate
+correction and rejection are available. Posting remains blocked in both the API and database until the
+opening-balance effective-date and recurring-obligation reconciliation decisions are resolved. Cross-source
+duplicate linking, failed extraction records, and approval/posting are not implemented.
 
 ## 2. Android capture
 
@@ -126,7 +133,8 @@ or explicit review/failure states, never silent financial postings.
 
 ## Delivery order and validation
 
-1. Import inbox, idempotent review/approval, balance-date policy, and settlement correctness.
+1. Resolve balance-date and settlement policy before enabling posting; extend the delivered inbox with
+   cross-source reconciliation and atomic posting only after those decisions.
 2. Mobile authentication and one known bank's SMS format, then notification capture and offline sync.
 3. PDF upload, local extraction/OCR/AI, and inbox preview; card posting remains gated.
 4. Recurrence suggestions and only then opt-in automation.
@@ -140,7 +148,7 @@ balances, paid/part-paid forecasts, and edits/deletions of linked transactions.
 Use synthetic fixtures; perform real-device capture and focused mobile/desktop review-UI checks.
 Apply generated migrations to local PostgreSQL before committing schema changes.
 
-## Decisions needed before implementation
+## Decisions needed before enabling posting or later integrations
 
 - First bank application/sender and synthetic examples of its message formats.
 - Account effective-date semantics and card/transfer accounting behavior.
@@ -148,8 +156,8 @@ Apply generated migrations to local PostgreSQL before committing schema changes.
 - Server RAM/CPU/GPU for local OCR/model selection and extraction throughput.
 - Explicit upload limits and retention periods.
 
-Recommended next session: implement only item 1's inbox/idempotency foundation, resolving the
-balance-date and settlement behavior before enabling imported financial postings.
+Recommended next session: make the opening-balance effective-date and recurring-obligation
+settlement/reconciliation decisions before implementing any imported financial posting.
 
 ## Platform references
 
